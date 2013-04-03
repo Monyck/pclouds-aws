@@ -1,4 +1,34 @@
-pclouds-ec2instance
-===================
+ec2instance
+===========
 
-Puppet Type / Provider for managing EC2 Compute instances via Puppet Manifests
+This puppet module allows you to create EC2 instances using Puppet manifests.
+
+More details are [http://www.practicalclouds.com/content/guide/pclouds-ec2instance](http://www.practicalclouds.com/content/guide/pclouds-ec2instance)
+
+License
+-------
+
+ Copyright 2011 David McCormick
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+Contact
+-------
+
+dave(at)practicalclouds.com
+
+Support
+-------
+
+Please log tickets and issues at our [Projects site](http://github.com/practicalclouds/pclouds-ec2instance/issues)
+
