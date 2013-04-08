@@ -15,18 +15,27 @@ Puppet::Type.newtype(:ec2instance) do
 		isrequired
 	end
 
+   # AvailabilityZone and Region - we need to determine which aws region we need to communicate with.
+	# The user can specify either the availability zone or a region. If they specify an availability zone
+   # then we will calculate the region from that.
 	newparam(:AvailabilityZone) do
 		desc "The availability zone that the instance should run in"
-		isrequired
+	end
+
+   # If the user does not select a specific availability zone then they can choose a region and the instance
+   # will be started in any of the availability zones in that region.  If no region is specified then we
+   # will automatically choose the same region as the server owning the ec2instance resource (the one 
+   # performing the puppet run)
+	newparam(:Region) do
+		desc "The region that this instance belongs."
 		defaultto do
-			Facter.value('ec2_placement_availability_zone') 
+			Facter.value('ec2_placement_availability_zone').gsub(/.$/,'') 
 		end
 	end
 
 	newparam(:InstanceType) do
 		valid_types = [ 't1.micro','m1.small','m1.medium','m1.large','m1.xlarge','m3.xlarge','m3.2xlarge','c1.medium','c1.xlarge','m2.xlargei','m2.2xlarge','m2.4xlarge','cr1.8xlarge','hi1.4xlarge','hs1.8xlarge','cc1.4xlarge','cc2.8xlarge','cg1.4xlarge' ]
 		desc "The instance type: Valid values are: #{valid_types.join(', ')}"
-		isrequired
 		defaultto 'm1.small'
 		validate do |value|
 			unless valid_types.include?(value)
@@ -47,7 +56,6 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newparam(:MinCount) do
 		desc "The minimum number of instances to launch."
-		isrequired
 		defaultto 1
 		validate do |value|
 			unless value =~ /^[0-9]+$/
@@ -58,7 +66,6 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newparam(:MaxCount) do
 		desc "The maximum number of instances to launch."
-		isrequired
 		defaultto 1
 		validate do |value|
 			unless value =~ /^[0-9]+$/
@@ -91,7 +98,7 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "The user data which you want to pass the instance when it boots in string format."
 	end
 
-	newparam(:UserData64) do
+	newparam(:UserDataBase64) do
 		desc "The user data which you want to pass the instance when it boots in Base64 format."
 	end
 
@@ -188,6 +195,8 @@ Puppet::Type.newtype(:ec2instance) do
 	# - DeviceName: /dev/xvdd
 	#   Ebs.VolumeSize: 100
 
+   # This is a complete experiment and unlikely to work.  I'm going to get the basic functionality working first.
+
 	newparam(:BlockDeviceMapping) do
 		desc "Expert Feature: BlockDeviceMapping is expected to be a yaml encoded array of hashes which contain valid block device mapping information to the instance when it launches.  See http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/block-device-mapping-concepts.html for more information." 
 		munge do |value|
@@ -201,7 +210,5 @@ Puppet::Type.newtype(:ec2instance) do
 			YAML.dump(value)
 		end
 	end
-			
-
 
 end
