@@ -11,7 +11,7 @@ Puppet::Type.type(:ec2instance).provide(:aws) do
 	commands :fog => '/usr/bin/fog'
 
 	def create
-		required_params = [ :Name, :ImageId,:MinCount, :MaxCount ]
+		required_params = { 'name' => 'Name', 'image_id' => 'ImageId', 'min_count' => 'MinCount', 'max_count' => 'MaxCount' }
 		simple_params = [ :InstanceType, :KeyName, :KernelId, :RamdiskId, :MonitoringEnabled, :SubnetId, :PrivateIpAddress, :DisableApiTermination, :InstanceInitiatedShutdownBehavior, :EbsOptimized ]
 		#complex_params = [ :SecurityGroupNames, :SecurityGroupIds, :UserData, :UserDataBase64, :BlockDeviceMapping ]
 		fog_options = {}
