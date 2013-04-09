@@ -11,31 +11,31 @@ Puppet::Type.type(:ec2instance).provide(:aws) do
 	commands :fog => '/usr/bin/fog'
 
 	def create
-		required_params = { 'name' => 'Name', 'image_id' => 'ImageId', 'min_count' => 'MinCount', 'max_count' => 'MaxCount' }
-		simple_params = [ :InstanceType, :KeyName, :KernelId, :RamdiskId, :MonitoringEnabled, :SubnetId, :PrivateIpAddress, :DisableApiTermination, :InstanceInitiatedShutdownBehavior, :EbsOptimized ]
-		#complex_params = [ :SecurityGroupNames, :SecurityGroupIds, :UserData, :UserDataBase64, :BlockDeviceMapping ]
+		required_params = [ :name, :image_id, :min_count, :max_count ]
+		simple_params = [ :instance_type, :key_name, :kernel_id, :ramdisk_id, :monitoring_enabled, :subnet_id, :private_ip_address, :disable_api_termination, :instance_initiated_shutdown_behavior, :ebs_optimized, :user_data ]
+		#complex_params = [ :security_group_names, :security_group_ids, :block_device_mapping ]
 		fog_options = {}
 
 		# check required parameters...
   		required_params.each {|param|
     		if (!resource[param])
-      		notice "Missing required option #{param}!"
+      		notice "Missing required attribute #{param}!"
       		raise "ec2instance[aws]->create: Sorry, you must include \"#{param}\" when defining an ec2instance!"
     		end
   		}
 		# copy simple parameters to the fog_options hash..
   		simple_params.each {|param|
     		if (resource[param])
-				notice "Adding fog option #{param} : #{resource[param]}"
-				fog_options[param]=resource[param]		
+				notice "Adding fog parameter #{param_to_fog(param.to_s)} : #{resource[param]}"
+				fog_options[param_to_fog(param.to_s)]=resource[param]		
     		end
   		}
 
 		# Work out region and connect to AWS...
-		if (resource[:AvailabilityZone]) then
-			region = resource[:AvailabilityZone].gsub(/.$/,'')
-		elsif (resource[:Region]) then
-			region = resource[:Region]
+		if (resource[:availability_zone]) then
+			region = resource[:availability_zone].gsub(/.$/,'')
+		elsif (resource[:region]) then
+			region = resource[:region]
 		end
 		Fog.mock!
 		compute = Fog::Compute.new(:provider => 'aws', :region => "#{region}")
@@ -52,7 +52,7 @@ Puppet::Type.type(:ec2instance).provide(:aws) do
   		#}
 
 		# start the instance
-		response = compute.run_instances(resource[:ImageID],resource[:MinCount].to_i,resource[:MaxCount].to_i,fog_options)	
+		response = compute.run_instances(resource[:image_id],resource[:MinCount].to_i,resource[:MaxCount].to_i,fog_options)	
 		if (response.status == 200)
 			instid = response.body[instancesSet][0]['instanceId']
 			notice "ec2instance[aws]->create: booting instance #{instid}.\n" if $debug
@@ -143,4 +143,10 @@ Puppet::Type.type(:ec2instance).provide(:aws) do
 		nil
 	end
 
+	# takes a puppet parmeter with underscores, e.g. block_device_mapping
+	# converts to fog style, e.g. BlockDeviceMapping
+	def param_to_fog(param)
+		temp = param.gsub(/^./) {|w| w.capitalize}
+		temp.gsub(/_[^_]+/) {|w| w.gsub(/^_/,'').capitalize }
+	end
 end
