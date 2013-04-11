@@ -126,7 +126,7 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "Enables monitoring for the instance."
 		defaultto 'false'
 		validate do |value|
-			unless valid_values.includes?(value)
+			unless valid_values.include?(value)
 				raise ArgumentError, "ec2instance: monitoring_enabled should be 'true' or 'false'"
 			end
 		end
@@ -146,7 +146,7 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
 		defaultto 'false'
 		validate do |value|
-			unless valid_values.includes?(value)
+			unless valid_values.include?(value)
 				raise ArgumentError, "ec2instance: disable_api_termination should be 'true' or 'false'"
 			end
 		end
@@ -157,7 +157,7 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "Whether the instance stops or terminates on instance-initiated shutdown."
 		defaultto 'stop'
 		validate do |value|
-			unless valid_values.includes?(value)
+			unless valid_values.include?(value)
 				raise ArgumentError, "ec2instance: instance_initiated_shutdown_behavior should be 'stop' or 'terminate'"
 			end
 		end
@@ -168,7 +168,7 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "Whether the instance is optimized for EBS I/O. This optimization provides dedicated throughput to Amazon EBS and an optimized configuration stack to provide optimal EBS I/O performance. This optimization isn't available with all instance types. Additional usage charges apply when using an EBS Optimized instance."
 		defaultto 'false'
 		validate do |value|
-			unless valid_values.includes?(value)
+			unless valid_values.include?(value)
 				raise ArgumentError, "ec2instance: ebs_optimized should be 'true' or 'false'"
 			end
 		end
