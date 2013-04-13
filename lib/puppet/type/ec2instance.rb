@@ -45,8 +45,8 @@ Puppet::Type.newtype(:ec2instance) do
 	end
 
 	newparam(:instance_type) do
-		desc "The instance type: Valid values are: #{valid_types.join(', ')}"
-		defaultto 'm1.small'
+		desc "The instance type"
+		defaultto :'m1.small'
 		newvalues(:"t1.micro", :"m1.small", :"m1.medium", :"m1.large", :"m1.xlarge", :"m3.xlarge", :"m3.2xlarge", :"c1.medium", :"c1.xlarge", :"m2.xlarge", :"m2.2xlarge", :"m2.4xlarge", :"cr1.8xlarge", :"hi1.4xlarge", :"hs1.8xlarge", :"cc1.4xlarge", :"cc2.8xlarge", :"cg1.4xlarge")
 	end
 
@@ -87,7 +87,7 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newparam(:kernel_id) do
 		desc "The ID of the kernel with which to launch the instance."
-		newvalues(/^aki-/
+		newvalues(/^aki-/)
 	end
 
 	newparam(:ramdisk_id) do
@@ -98,7 +98,7 @@ Puppet::Type.newtype(:ec2instance) do
 	newparam(:monitoring_enabled) do
 		desc "Enables monitoring for the instance."
 		newvalues(:true, :false)
-		defaultto 'false'
+		defaultto :false
 	end
 
 	newparam(:subnet_id) do
@@ -113,19 +113,31 @@ Puppet::Type.newtype(:ec2instance) do
 	newparam(:disable_api_termination) do
 		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
 		newvalues(:true, :false)
-		defaultto 'false'
+		defaultto :false
 	end
 
 	newparam(:instance_initiated_shutdown_behavior) do
 		desc "Whether the instance stops or terminates on instance-initiated shutdown."
 		newvalues(:stop, :terminate)
-		defaultto 'stop'
+		defaultto :stop
 	end
 
 	newparam(:ebs_optimized) do
 		desc "Whether the instance is optimized for EBS I/O. This optimization provides dedicated throughput to Amazon EBS and an optimized configuration stack to provide optimal EBS I/O performance. This optimization isn't available with all instance types. Additional usage charges apply when using an EBS Optimized instance."
 		newvalues(:true, :false)
-		defaultto 'false'
+		defaultto :false
+	end
+
+	newparam(:wait) do
+		desc "Whether to wait for the instance to finish starting up before returning from the provider."
+		newvalues(:true, :false)
+		defaultto :false
+	end
+
+	newparam(:max_wait) do
+		desc "How long to keep on waiting for an instance to start before throwing an error, in seconds"
+		newvalues(/^\d+/)
+		defaultto 600
 	end
 
 	# Expert Options

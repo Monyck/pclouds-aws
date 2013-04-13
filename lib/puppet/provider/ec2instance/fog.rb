@@ -12,6 +12,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	commands :fog => 'fog'
 
 	def create
+		notice "Creating new ec2 instance with name #{@resource[:name]}"
 		required_params = [ :name, :image_id, :min_count, :max_count ]
 		simple_params = { :instance_type => 'InstanceType', 
 			:key_name => 'KeyName', 
@@ -30,7 +31,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		required_params.each {|param|
 			if (!@resource[param])
 				notice "Missing required attribute #{param}!"
-				raise "ec2instance[aws]->create: Sorry, you must include \"#{param}\" when defining an ec2instance!"
+				raise "Sorry, you must include \"#{param}\" when defining an ec2instance!"
 			end
 		}
 		# copy simple parameters to the fog_options hash..
@@ -41,70 +42,71 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		}
 
-		# Work out region and connect to AWS...
 		if (@resource[:availability_zone]) then
 			region = @resource[:availability_zone].gsub(/.$/,'')
 		elsif (@resource[:region]) then
 			region = @resource[:region]
 		end
 		compute = Fog::Compute.new(:provider => 'aws', :region => "#{region}")
-		notice "ec2instance[aws]->create: Region is #{region}\n" if $debug
+		notice "Region is #{region}" if $debug
 
 		# process the complex params which need processing into fog options...
 		# each option is implemented as it's own method which maps
 		# parameters into fog_options 
 		#complex_params.each {|param|
 		#	if (@resource[param])
-		#		notice "ec2instance[aws]->create: processing parameter #{param}\n" if $debug
-		#		self.send(:"param_#{param}",compute,@resource,fog_options)
+		#		notice "Processing parameter #{param}\n" if $debug
+		#		@resource.send(:"param_#{param}",compute,@resource,fog_options)
 		#	end
 		#}
 
 		# start the instance
 		response = compute.run_instances(@resource[:image_id],@resource[:min_count].to_i,@resource[:max_count].to_i,fog_options)	
 		if (response.status == 200)
+			sleep 5
 			instid = response.body['instancesSet'][0]['instanceId']
-			notice "ec2instance[aws]->create: booting instance #{instid}.\n" if $debug
+			notice "Tagging instance #{instid} with Name #{@resource[:name]}." if $debug
 			response = compute.create_tags(instid,{ :Name => @resource[:name] })
-			if (response.status == 200)
-				notice "ec2instance[aws]->create: I tagged #{instid} with Name = #{@resource[:name]}\n" if $debug
-			else
-				raise "ec2instance[aws]->create: I couldn't tag #{instid} with Name = #{@resource[:name]}, sorry! API Error!"
+			if (response.status != 200)
+				raise "I couldn't tag #{instid} with Name = #{@resource[:name]}"
 			end
 			if (@resource[:wait] == :true)
-				# Wait for my instance to start...
-				elapsed_wait=0
-				check = instanceinfo(compute,@resource[:name])
-				if ( check && check['instanceState']['name'] == "pending" )
-					notice "Waiting for #{@resource[:name]} tp start up..."
-					while ( check['instanceState']['name'] != "running" && elapsed_wait < @resource[:max_wait]  ) do
-						notice "ec2instance[aws]->create: #{@resource[:name]} is #{check['instanceState']['name']}\n" if $debug
-						sleep 5
-						elapsed_wait += 5
-						check = instanceinfo(compute,@resource[:name])
-					end
-					if (elapsed_wait >= @resource[:max_wait])
-						raise "ec2instance[aws]->create: Timed out waiting for #{@resource[:name]} to start up!"
-					else
-						sleep 5  # allow aws to propigate the fact
-						notice "ec2instance[aws]->create: #{@resource[:name]} is #{check['instanceState']['name']}\n" if $debug
-					end
-				elsif (check && check['instanceState']['name'] != "running" )
-					raise "ec2instance[aws]->create: Sorry, #{@resource[:name]} is #{check['instanceState']['name']} and I expected it to be 'pending'"
-				end
+				wait_state(compute,@resource[:name],'running',@resource[:max_wait])
 			end
 		else
-			raise "ec2instance[aws]->create: I couldn't create the ec2instance, sorry! API Error!"
+			raise "I couldn't create the ec2 instance, sorry! API Error!"
 		end
 	end
 
 	def destroy
-		# remove an existing ec2instance
-		notice "The man would stop the ec2instance..."
+		if (@resource[:availability_zone]) then
+			region = @resource[:availability_zone].gsub(/.$/,'')
+		elsif (@resource[:region]) then
+			region = @resource[:region]
+		end
+		compute = Fog::Compute.new(:provider => 'aws', :region => "#{region}")
+		instance = instanceinfo(compute,@resource[:name])
+		if (instance)
+			notice "Terminating ec2 instance #{@resource[:name]} : #{instance['instanceId']}"
+		else
+			raise "Sorry I could not lookup the instance with name #{@resource[:name]}" if (!instance)
+		end
+		response = compute.terminate_instances(instance['instanceId'])
+		if (response.status != 200)
+			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
+		else
+			if (@resource[:wait] == :true)
+				wait_state(compute,@resource[:name],'terminated',@resource[:max_wait])
+			end
+			notice "Removing Name tag #{@resource[:name]} from #{instance['instanceId']}"
+			response = compute.delete_tags(instance['instanceId'],{ 'Name' => @resource[:name]}) 
+			if (response.status != 200)
+				raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
+			end
+		end
 	end
 
 	def exists?
-		notice "Looking for an instance of Name #{@resource['name']}" if ($debug)
 		if (@resource[:availability_zone]) then
 			region = @resource[:availability_zone].gsub(/.$/,'')
 		elsif (@resource[:region]) then
@@ -113,7 +115,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		compute = Fog::Compute.new(:provider => 'aws', :region => "#{region}")
 		instanceinfo(compute,@resource[:name])
 	end
-
 
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(compute,name)
@@ -128,9 +129,31 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				}
 			}
 		else
-			raise "ec2instance[aws]->instanceinfo: I couldn't list the instances"
+			raise "I couldn't list the instances"
 		end
 		false	
 	end	
+
+	# generic method to wait for an instance state...
+	def wait_state(compute,name,desired_state,max)
+		elapsed_wait=0
+		check = instanceinfo(compute,name)
+		if ( check )
+			notice "Waiting for instance #{name} to be #{desired_state}"
+			while ( check['instanceState']['name'] != desired_state && elapsed_wait < max ) do
+				notice "instance #{name} is #{check['instanceState']['name']}" if $debug
+				sleep 5
+				elapsed_wait += 5
+				check = instanceinfo(compute,name)
+			end
+			if (elapsed_wait >= max)
+				raise "Timed out waiting for name to be #{desired_state}"
+			else
+				notice "Instance #{name} is now #{desired_state}"
+			end
+		else
+			raise "Sorry, I couldn't find instance #{name}"
+		end
+	end
 
 end
