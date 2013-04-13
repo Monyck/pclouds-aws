@@ -20,6 +20,7 @@ Puppet::Type.newtype(:ec2instance) do
 	# then we will calculate the region from that.
 	newparam(:availability_zone) do
 		desc "The availability zone that the instance should run in"
+		newvalues(/^eu-west-\d[a-z]$/, /^us-east-\d[a-z]$/, /^us-west-\d[a-z]$/, /^ap-southeast-\d[a-z]$/, /^ap-northeast-\d[a-z]$/, /^sa-east-\d[a-z]$/) 
 	end
 
 	# If the user does not select a specific availability zone then they can choose a region and the instance
@@ -28,75 +29,56 @@ Puppet::Type.newtype(:ec2instance) do
 	# performing the puppet run)
 	newparam(:region) do
 		desc "The region that this instance belongs."
+		newvalues(/^eu-west-\d$/, /^us-east-\d$/, /^us-west-\d$/, /^ap-southeast-\d$/, /^ap-northeast-\d$/, /^sa-east-\d$/) 
 		defaultto do
-			resource[:availability_zone] ? resource[:availability_zone].gsub(/.$/,'') : Facter.value('ec2_placement_availability_zone').gsub(/.$/,'')
+			self[:availability_zone] ? self[:availability_zone].gsub(/.$/,'') : Facter.value('ec2_placement_availability_zone').gsub(/.$/,'')
 		end
-		validate do |value|
-			if (resource[:availability_zone] && resource[:availability_zone].gsub(/.$/,'') != value)
-				raise ArgumentError , "ec2instance: Sorry, availability_zone #{resource[:availability_zone]} is in region #{resource[:availability_zone].gsub(/.$/,'')}.  Please leave the 'region' blank or correct it."
+	end
+
+	# Validate that the :availability_zone and :region are correct if both specified.
+   validate do
+		if (self[:region] && self[:availability_zone]) 
+			if (self[:region] != self[:availability_zone].gsub(/.$/,''))
+				raise ArgumentError , "ec2instance: Sorry, availability_zone #{self[:availability_zone]} is in region #{self[:availability_zone].gsub(/.$/,'')}.  Please leave the 'region' blank or correct it."
 			end
 		end
 	end
 
 	newparam(:instance_type) do
-		valid_types = [ 't1.micro','m1.small','m1.medium','m1.large','m1.xlarge','m3.xlarge','m3.2xlarge','c1.medium','c1.xlarge','m2.xlargei','m2.2xlarge','m2.4xlarge','cr1.8xlarge','hi1.4xlarge','hs1.8xlarge','cc1.4xlarge','cc2.8xlarge','cg1.4xlarge' ]
 		desc "The instance type: Valid values are: #{valid_types.join(', ')}"
 		defaultto 'm1.small'
-		validate do |value|
-			unless valid_types.include?(value)
-				raise ArgumentError , "ec2instance: #{value} is not valid instance_type"
-			end
-		end
+		newvalues(:"t1.micro", :"m1.small", :"m1.medium", :"m1.large", :"m1.xlarge", :"m3.xlarge", :"m3.2xlarge", :"c1.medium", :"c1.xlarge", :"m2.xlarge", :"m2.2xlarge", :"m2.4xlarge", :"cr1.8xlarge", :"hi1.4xlarge", :"hs1.8xlarge", :"cc1.4xlarge", :"cc2.8xlarge", :"cg1.4xlarge")
 	end
 
 	newparam(:image_id) do
 		desc "The image_id for the AMI to boot from"
 		isrequired
-		validate do |value|
-			unless value =~ /^ami-/
-				raise ArgumentError , "ec2instance: #{value} is not valid image_id which start 'ami-'"
-			end
-		end
+		newvalues(/^ami-/)
 	end
 
 	newparam(:min_count) do
 		desc "The minimum number of instances to launch."
 		defaultto '1'
-		validate do |value|
-			unless value =~ /^[0-9]+$/
-				raise ArgumentError , "ec2instance: #{value} is not a valid, min_count needs to be an integer."
-			end
-		end
+		newvalues(/^\d+$/)
 	end
 
 	newparam(:max_count) do
 		desc "The maximum number of instances to launch."
 		defaultto '1'
-		validate do |value|
-			unless value =~ /^[0-9]+$/
-				raise ArgumentError , "ec2instance: #{value} is not a valid, max_count needs to be an integer."
-			end
-		end
+		newvalues(/^\d+$/)
 	end
 
 	newparam(:key_name) do
 		desc "The name of the key pair to use."
 	end
 
-	newparam(:security_group_names) do
-		desc "A comma separated list of security groups by Name that you want the instance to join."
+	newparam(:security_group_names, :array_matching => :all) do
+		desc "A list of security groups by Name that you want the instance to join."
 	end
 
-	newparam(:security_group_ids) do
-		desc "A comma separated list of security groups by security group id that you want the instance to join."
-		validate do |value|
-			groupids=value.split(/\s*,\s*/)
-			groupids.each {|id|
-				unless id =~ /^sg-/
-					raise ArgumentError, "ec2instance: #{id} is not valid, security group ids start 'sg-'"
-				end
-			}
-		end
+	newparam(:security_group_ids, :array_matching => :all) do
+		desc "A list of security groups by security group id that you want the instance to join."
+		newvalues(/^sg-/)
 	end
 
 	newparam(:user_data) do
@@ -105,31 +87,18 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newparam(:kernel_id) do
 		desc "The ID of the kernel with which to launch the instance."
-		validate do |value|
-			unless value =~ /^aki-/
-				raise ArgumentError , "ec2instance: #{value} is not valid kernel_id which start 'aki-'"
-			end
-		end
+		newvalues(/^aki-/
 	end
 
 	newparam(:ramdisk_id) do
 		desc "The ID of the RAM disk. Some kernels require additional drivers at launch. Check the kernel requirements for information on whether you need to specify a RAM disk. To find kernel requirements, refer to the Resource Center and search for the kernel ID."
-		validate do |value|
-			unless value =~ /^ari-/
-				raise ArgumentError , "ec2instance: #{value} is not valid ramdisk_id which start 'ari-'"
-			end
-		end
+		newvalues(/^ari-/)
 	end
 
 	newparam(:monitoring_enabled) do
-		valid_values=['true', 'false']
 		desc "Enables monitoring for the instance."
+		newvalues(:true, :false)
 		defaultto 'false'
-		validate do |value|
-			unless valid_values.include?(value)
-				raise ArgumentError, "ec2instance: monitoring_enabled should be 'true' or 'false'"
-			end
-		end
 	end
 
 	newparam(:subnet_id) do
@@ -142,36 +111,21 @@ Puppet::Type.newtype(:ec2instance) do
 	end
 
 	newparam(:disable_api_termination) do
-		valid_values=['true', 'false']
 		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
+		newvalues(:true, :false)
 		defaultto 'false'
-		validate do |value|
-			unless valid_values.include?(value)
-				raise ArgumentError, "ec2instance: disable_api_termination should be 'true' or 'false'"
-			end
-		end
 	end
 
 	newparam(:instance_initiated_shutdown_behavior) do
-		valid_values=['stop', 'terminate']
 		desc "Whether the instance stops or terminates on instance-initiated shutdown."
+		newvalues(:stop, :terminate)
 		defaultto 'stop'
-		validate do |value|
-			unless valid_values.include?(value)
-				raise ArgumentError, "ec2instance: instance_initiated_shutdown_behavior should be 'stop' or 'terminate'"
-			end
-		end
 	end
 
 	newparam(:ebs_optimized) do
-		valid_values=['true', 'false']
 		desc "Whether the instance is optimized for EBS I/O. This optimization provides dedicated throughput to Amazon EBS and an optimized configuration stack to provide optimal EBS I/O performance. This optimization isn't available with all instance types. Additional usage charges apply when using an EBS Optimized instance."
+		newvalues(:true, :false)
 		defaultto 'false'
-		validate do |value|
-			unless valid_values.include?(value)
-				raise ArgumentError, "ec2instance: ebs_optimized should be 'true' or 'false'"
-			end
-		end
 	end
 
 	# Expert Options
