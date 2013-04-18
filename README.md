@@ -1,9 +1,9 @@
-ec2instance
+pclouds-aws
 ===========
 
-This puppet module allows you to create EC2 instances using Puppet manifests.
+This module allows you to create EC2 instances using Puppet.
 
-More details are [http://www.practicalclouds.com/content/guide/pclouds-ec2instance](http://www.practicalclouds.com/content/guide/pclouds-ec2instance)
+More details are [http://www.practicalclouds.com/content/guide/pclouds-aws](http://www.practicalclouds.com/content/guide/pclouds-aws)
 
 License
 -------
@@ -30,5 +30,5 @@ dave(at)practicalclouds.com
 Support
 -------
 
-Please log tickets and issues at our [Projects site](http://github.com/practicalclouds/pclouds-ec2instance/issues)
+Please log tickets and issues at our [Projects site](http://github.com/practicalclouds/pclouds-aws/issues)
 

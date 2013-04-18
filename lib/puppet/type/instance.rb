@@ -3,8 +3,8 @@ require 'facter'
 require 'fog'
 require 'yaml'
 
-Puppet::Type.newtype(:ec2instance) do
-	@doc = "Manage EC2 Instances"
+Puppet::Type.newtype(:instance) do
+	@doc = "EC2 Instances"
 
 	# Allow to be ensurable
 	ensurable
