@@ -5,7 +5,7 @@ require 'pp'
 
 $debug=true
 
-Puppet::Type.type(:ec2instance).provide(:fog) do
+Puppet::Type.type(:awscompute).provide(:fog) do
 	desc "The AWS Provider which implements the ec2instance type."
 
 	# Only allow the provider if fog is installed.
