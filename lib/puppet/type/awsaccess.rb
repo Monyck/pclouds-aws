@@ -3,14 +3,14 @@ require 'facter'
 require 'fog'
 require 'yaml'
 
-Puppet::Type.newtype(:awsconfig) do
-	@doc = "EC2 Instances"
+Puppet::Type.newtype(:awsaccess) do
+	@doc = "The awsaccess resource allows us to configure different access credemtials and regions of operation through puppet"
 
 	# Allow to be ensurable
 	ensurable
 
 	newparam(:name) do
-		desc "A name for the config, must be unique"
+		desc "A name for the access resource, must be unique"
 		isnamevar
 		defaultto "awsconfig"
 	end
@@ -19,7 +19,7 @@ Puppet::Type.newtype(:awsconfig) do
 		desc "The AWS Access Key"
 		isrequired
 		validate do |value|
-			unless (value.length == 20 && value =~ /^[A-Za-z0-9]+/) do
+			unless (value.length == 20 && value =~ /^[A-Za-z0-9]+/) then
 				fail("A valid aws_access_key_id is a 20 character alphanumeric!")
 			end
 		end
@@ -29,7 +29,7 @@ Puppet::Type.newtype(:awsconfig) do
 		desc "The AWS Secret Access Key"
 		isrequired
 		validate do |value|
-			unless (value.length == 40 && value =~ /^[A-Za-z0-9\/+]+/) do
+			unless (value.length == 40 && value =~ /^[A-Za-z0-9\/+]+/) then
 				fail("A valid aws_secret_access_key is a 40 character alphanumeric (plus / and +)!")
 			end
 		end

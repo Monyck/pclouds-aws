@@ -5,8 +5,8 @@ require 'pp'
 
 $debug=true
 
-Puppet::Type.type(:awsconfig).provide(:fog) do
-	desc "The awsconfig type allows us to configure AWS access and secret keys from within puppet.  It also allow us to define which regions we wish to connect to and ensure unqiueness across (by default we ensure a unique Name across all known regions of Amazon AWS, change to restrict it to run within a subset of regions. "
+Puppet::Type.type(:awsaccess).provide(:fog) do
+	desc "The awsaccess resource allows us to configure AWS access and secret keys from within puppet.  It also allow us to define which regions we wish to connect to and ensure unqiueness across (by default we ensure a unique Name across all known regions of Amazon AWS, change to restrict it to run within a subset of regions. "
 
 	# Only allow the provider if fog is installed.
 	commands :fog => 'fog'
@@ -60,29 +60,18 @@ Puppet::Type.type(:awsconfig).provide(:fog) do
 	end
 
 	def flush
-		puts "entered flush..."
-		puts @updated_properties
 		if @updated_properties == true
 			configshash = {}
 			if (File.exists?(Puppet[:confdir] + '/awsconfigs.yaml'))
-				puts "loading yaml file..."
 				configshash = YAML::load(File.open(Puppet[:confdir] + '/awsconfigs.yaml'))
-			else
-				puts "yaml file does not exist"
 			end
 			if (@property_hash[:ensure] == :present)
-				puts "Adding or updating configs..."
 				configshash[@property_hash[:name]] = @property_hash
 				configshash[@property_hash[:name]].delete(:name)
 			else
-				puts "Removing configs..."
 				configshash.delete(@property_hash[:name])
 			end
-			puts "Saving the following configshash:-"
-			pp configshash
 			File.open(Puppet[:confdir] + '/awsconfigs.yaml','w+') {|f| f.write(configshash.to_yaml) }
-		else
-			puts "I don't need to make any updates.."
 		end
 	end
 
