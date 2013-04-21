@@ -15,14 +15,16 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
 
 		return [] if (!File.exists?(@yamlfile))
+		resp=[]
 		chash = YAML::load(File.open(@yamlfile))
-		chash.keys.map {|n|
+		chash.keys.each {|n|
 			settings = chash[n]
 			settings[:name] = n
 			settings[:ensure] = :present
-			new(settings) 
+			resp << new(settings) 
 		}
-			end
+		resp
+	end
 
 	def self.prefetch(resources)
 		configs = instances
@@ -54,12 +56,12 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 		atts = [ :name, :ensure, :regions, :aws_access_key_id, :aws_secret_access_key ]
 		atts.each {|att| @property_hash[att] = @resource[att] if (@resource[att])}
 		@updated_properties = true
-		end
+	end
 
 	def destroy
 		@updated_properties = true
 		@property_hash[:ensure] = :absent
-		end
+	end
 
 	def flush
 		if (@updated_properties == true)
@@ -79,8 +81,6 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 
 	def exists?
 		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
-      #davetest = @resource.catalog.resources
-      #pp davetest
 		@property_hash[:ensure] == :present
-		end
+	end
 end
