@@ -12,16 +12,17 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	commands :fog => 'fog'
 
 	def self.instances
-		configfile="#{Puppet[:confdir]}/awsconfigs.yaml"
-		return [] if (!File.exists?(configfile))
-		confighash = YAML::load(File.open(configfile))
-		confighash.keys.map {|n|
-			settings = confighash[n]
+		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
+
+		return [] if (!File.exists?(@yamlfile))
+		chash = YAML::load(File.open(@yamlfile))
+		chash.keys.map {|n|
+			settings = chash[n]
 			settings[:name] = n
 			settings[:ensure] = :present
 			new(settings) 
 		}
-	end
+			end
 
 	def self.prefetch(resources)
 		configs = instances
@@ -38,32 +39,33 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 		@updated_properties = true
 		@property_hash[:aws_access_key_id] = value
 	end
-	
+
 	def aws_secret_access_key=(value)
 		@updated_properties = true
 		@property_hash[:aws_secret_access_key] = value
 	end
-	
+
 	def regions=(value)
 		@updated_properties = true
 		@property_hash[:regions] = value
 	end
 
 	def create
+		atts = [ :name, :ensure, :regions, :aws_access_key_id, :aws_secret_access_key ]
+		atts.each {|att| @property_hash[att] = @resource[att] if (@resource[att])}
 		@updated_properties = true
-		@property_hash[:ensure] = :present
-	end
+		end
 
 	def destroy
 		@updated_properties = true
 		@property_hash[:ensure] = :absent
-	end
+		end
 
 	def flush
-		if @updated_properties == true
+		if (@updated_properties == true)
 			configshash = {}
-			if (File.exists?(Puppet[:confdir] + '/awsconfigs.yaml'))
-				configshash = YAML::load(File.open(Puppet[:confdir] + '/awsconfigs.yaml'))
+			if (File.exists?(@yamlfile))
+				configshash = YAML.load(File.read(@yamlfile))
 			end
 			if (@property_hash[:ensure] == :present)
 				configshash[@property_hash[:name]] = @property_hash
@@ -71,11 +73,14 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 			else
 				configshash.delete(@property_hash[:name])
 			end
-			File.open(Puppet[:confdir] + '/awsconfigs.yaml','w+') {|f| f.write(configshash.to_yaml) }
+			File.open(@yamlfile,'w+') {|f| f.write(configshash.to_yaml) }
 		end
 	end
 
 	def exists?
+		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
+      #davetest = @resource.catalog.resources
+      #pp davetest
 		@property_hash[:ensure] == :present
-	end
+		end
 end

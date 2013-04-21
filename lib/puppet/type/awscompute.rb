@@ -2,8 +2,9 @@ require 'rubygems'
 require 'facter'
 require 'fog'
 require 'yaml'
+require 'pp'
 
-Puppet::Type.newtype(:instance) do
+Puppet::Type.newtype(:awscompute) do
 	@doc = "EC2 Instances"
 
 	# Allow to be ensurable
@@ -13,6 +14,10 @@ Puppet::Type.newtype(:instance) do
 		desc "The friendly Name (tag) of the EC2 Instance"
 		isnamevar
 		isrequired
+	end
+
+	newparam(:access) do
+		desc "Optional name of an awsaccess resource to use for connecting to AWS API"
 	end
 
 	# AvailabilityZone and Region - we need to determine which aws region we need to communicate with.
@@ -36,7 +41,7 @@ Puppet::Type.newtype(:instance) do
 	end
 
 	# Validate that the :availability_zone and :region are correct if both specified.
-   validate do
+	validate do
 		if (self[:region] && self[:availability_zone]) 
 			if (self[:region] != self[:availability_zone].gsub(/.$/,''))
 				raise ArgumentError , "ec2instance: Sorry, availability_zone #{self[:availability_zone]} is in region #{self[:availability_zone].gsub(/.$/,'')}.  Please leave the 'region' blank or correct it."
@@ -177,4 +182,20 @@ Puppet::Type.newtype(:instance) do
 		end
 	end
 
+	# Special autorequire for all objects in the 
+	# catalog of certain types
+
+	[ 'awsaccess' ].each {|type|
+		autorequire(type.to_sym) do
+			requires = []
+			catalog.resources.each {|d|
+				if (d.class.to_s == "Puppet::Type::#{type.capitalize}")
+					requires << d.name
+				end
+			}
+			requires
+		end
+	}	
+
 end
+

@@ -1,7 +1,4 @@
-require 'rubygems'
-require 'facter'
-require 'fog'
-require 'yaml'
+require 'pp'
 
 Puppet::Type.newtype(:awsaccess) do
 	@doc = "The awsaccess resource allows us to configure different access credemtials and regions of operation through puppet"
@@ -12,7 +9,7 @@ Puppet::Type.newtype(:awsaccess) do
 	newparam(:name) do
 		desc "A name for the access resource, must be unique"
 		isnamevar
-		defaultto "awsconfig"
+		defaultto "default"
 	end
 
 	newproperty(:aws_access_key_id) do
