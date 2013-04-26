@@ -4,7 +4,7 @@ require 'fog'
 require 'yaml'
 require 'pp'
 
-Puppet::Type.newtype(:awscompute) do
+Puppet::Type.newtype(:ec2instance) do
 	@doc = "EC2 Instances"
 
 	# Allow to be ensurable
@@ -21,6 +21,18 @@ Puppet::Type.newtype(:awscompute) do
 
 	newparam(:awsaccess) do
 		desc "Optional name of an awsaccess resource to use for managing this resource"
+	end
+
+	newparam(:min_count) do
+		desc "The minimum number of instances to launch."
+		defaultto '1'
+		newvalues(/^\d+$/)
+	end
+
+	newparam(:max_count) do
+		desc "The maximum number of instances to launch."
+		defaultto '1'
+		newvalues(/^\d+$/)
 	end
 
 	newparam(:wait) do
@@ -145,7 +157,7 @@ Puppet::Type.newtype(:awscompute) do
 	end
 
 	newproperty(:instance_state) do
-		desc "READONLY: The state of the awscompute instance"
+		desc "READONLY: The state of the ec2instance"
 	end
 
 	newproperty(:network_interfaces, :array_matching => :all) do
