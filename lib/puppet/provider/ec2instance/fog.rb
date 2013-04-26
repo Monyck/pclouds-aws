@@ -64,6 +64,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						readprops[:instance_type] = y['instanceType'] if y['instanceType']
 						readprops[:key_name] = y['keyName'] if y['keyName']
 						readprops[:kernel_id] = y['kernelId'] if y['kernelId']
+						readprops[:image_id] = y['imageId'] if y['imageId']
 						readprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
 						readprops[:subnet_id] = y['subnetId'] if y['subnetId']
 						readprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
@@ -106,6 +107,23 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	mk_resource_methods
+
+   def exists?
+      # set up awsaccess credentials
+      @cred={}
+      if @resource['awsaccess'] then
+         @cred=Puppet::Type::Ec2instance::ProviderFog::get_access(@resource['awsaccess'],false)
+      else
+         @cred=Puppet::Type::Ec2instance::ProviderFog::get_access('default',true)
+      end
+      if (!@cred[:aws_access_key_id] || !@cred[:aws_secret_access_key])
+         fail "Can't find any awsaccess resources to use to connect to amazon.  Please configure at least one awsaccess resource!"
+      end
+      @compute = Fog::Compute.new(:provider => 'aws', :aws_access_key_id => @cred[:aws_access_key_id], :aws_secret_access_key => @cred[:aws_secret_access_key], :region => "#{region}")
+      Fog::mock!
+
+      @property_hash[:ensure] == :present
+   end
 
 	def create
 		notice "Creating new ec2 instance with name #{@resource[:name]}"
@@ -164,50 +182,93 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def destroy
-		#instance = instanceinfo(@resource[:name])
-		#if (instance)
-		#	notice "Terminating ec2 instance #{@resource[:name]} : #{instance['instanceId']}"
-		#else
-		#	raise "Sorry I could not lookup the instance with name #{@resource[:name]}" if (!instance)
-		#end
-		#response = @compute.terminate_instances(instance['instanceId'])
-		#if (response.status != 200)
-		#	raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
-		#else
-		#	if (@resource[:wait] == :true)
-		#		wait_state(@resource[:name],'terminated',@resource[:max_wait])
-		#	end
-		#	notice "Removing Name tag #{@resource[:name]} from #{instance['instanceId']}"
-		#	response = @compute.delete_tags(instance['instanceId'],{ 'Name' => @resource[:name]}) 
-		#	if (response.status != 200)
-		#		raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
-		#	end
-		#end
+		instance = instanceinfo(@resource[:name])
+		if (instance)
+			notice "Terminating ec2 instance #{@resource[:name]} : #{instance['instanceId']}"
+		else
+			raise "Sorry I could not lookup the instance with name #{@resource[:name]}" if (!instance)
+		end
+		response = @compute.terminate_instances(instance['instanceId'])
+		if (response.status != 200)
+			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
+		else
+			if (@resource[:wait] == :true)
+				wait_state(@resource[:name],'terminated',@resource[:max_wait])
+			end
+			notice "Removing Name tag #{@resource[:name]} from #{instance['instanceId']}"
+			response = @compute.delete_tags(instance['instanceId'],{ 'Name' => @resource[:name]}) 
+			if (response.status != 200)
+				raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
+			end
+		end
 	end
 
-	def exists?
-      # set up awsaccess credentials
-      @cred={}
-      if @resource['awsaccess'] then
-         @cred=Puppet::Type::Ec2instance::ProviderFog::get_access(@resource['awsaccess'],false)
-      else
-         @cred=Puppet::Type::Ec2instance::ProviderFog::get_access('default',true)
-      end
-      if (!@cred[:aws_access_key_id] || !@cred[:aws_secret_access_key])
-         fail "Can't find any awsaccess resources to use to connect to amazon.  Please configure at least one awsaccess resource!"
-      end
-		@compute = Fog::Compute.new(:provider => 'aws', :aws_access_key_id => @cred[:aws_access_key_id], :aws_secret_access_key => @cred[:aws_secret_access_key], :region => "#{region}")
+	#---------------------------------------------------------------------------------------------------
+	# Properties which can't be changed...
 
-		@property_hash[:ensure] == :present
+	def availability_zone=(value)
+		fail "Sorry you can't change the availability_zone of a running ec2instance"
 	end
 
 	def region=(value)
-		fail "Sorry you can't change the region of an ec2 instance without destorying it"
+		fail "Sorry you can't change the region of a running ec2instance"
 	end
 
-	def availability_zone=(value)
-		fail "Sorry you can't change the region of an ec2 instance without destorying it"
+	def instance_type=(value)
+		fail "Sorry you can't change the instance_type of a running ec2instance"
 	end
+
+	def image_id=(value)
+		fail "Sorry you can't change the image_id of a running ec2instance"
+	end
+
+	def image_id=(value)
+		fail "Sorry you can't change the image_id of a running ec2instance"
+	end
+
+	def subnet_id=(value)
+		fail "Sorry you can't change the subnet_id of a running ec2instance"
+	end
+
+	#---------------------------------------------------------------------------------------------------
+	# Properties where changes can be ignored...
+
+
+
+	#---------------------------------------------------------------------------------------------------
+	# Properties which CAN be changed...
+
+	        # ==== Parameters
+        # * instance_id<~String> - Id of instance to modify
+        # * attributes<~Hash>:
+        #   'InstanceType.Value'<~String> - New instance type
+        #   'Kernel.Value'<~String> - New kernel value
+        #   'Ramdisk.Value'<~String> - New ramdisk value
+        #   'UserData.Value'<~String> - New userdata value
+        #   'DisableApiTermination.Value'<~Boolean> - Change api termination value
+        #   'InstanceInitiatedShutdownBehavior.Value'<~String> - New instance initiated shutdown behaviour, in ['stop', 'terminate']
+        #   'SourceDestCheck.Value'<~Boolean> - New sourcedestcheck value
+        #   'GroupId'<~Array> - One or more groups to add instance to (VPC only)
+
+	def security_group_names=(value)
+		debug "TODO: Modify the assigned security groups.."
+   end
+
+	def security_group_ids=(value)
+		debug "TODO: Modify the assigned security groups.."
+   end
+
+	def kernel_value=(value)
+		debug "TODO: Modify the kernel id"
+   end
+
+	def ramdisk_value=(value)
+		debug "TODO: Modify the ramdisk id"
+   end
+
+	def monitoring_enabled=(value)
+		debug "TODO: Enable/disable monitoring..."
+   end
 
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(name)
