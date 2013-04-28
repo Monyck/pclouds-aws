@@ -126,42 +126,102 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newproperty(:ip_address) do
 		desc "READONLY: The public IP address of the instance"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:architecture) do
 		desc "READONLY: i386 or x86_64"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:dns_name) do
 		desc "READONLY: The instances public DNS name"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:private_dns_name) do
 		desc "READONLY: The instances private DNS name"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:root_device_type) do
 		desc "READONLY: The type of the root device"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:launch_time) do
 		desc "READONLY: The time an instance was launched"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:virtualization_type) do
 		desc "READONLY: The type of virtualization"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:owner_id) do
 		desc "READONLY: The AWS ID of the Owner"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:instance_state) do
 		desc "READONLY: The state of the ec2instance"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:network_interfaces, :array_matching => :all) do
 		desc "READONLY: Network inferface information"
+		munge do |v|
+			"readonly"
+		end
+		unmunge do |v|
+			"readonly"
+		end
 	end
 
 	newproperty(:tags, :array_matching => :all) do
