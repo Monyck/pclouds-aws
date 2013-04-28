@@ -23,41 +23,43 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			debug "Querying region #{reg}"
 			resp = compute.describe_instances
 			if (resp.status == 200)
-				readprops={}
 				# check through the instances looking for one with a matching Name tag
 				resp.body['reservationSet'].each do |x|
-					readprops[:security_group_names] = x['groupSet']
-					readprops[:security_group_ids] = x['groupIds']
+					secprops={}
+					secprops[:security_group_names] = x['groupSet']
+					secprops[:security_group_ids] = x['groupIds']
 					x['instancesSet'].each do |y|
 						myname = y['tagSet']['Name'] ? y['tagSet']['Name'] : y['instanceId']
 						debug "Found ec2instance instance : #{myname}"
-						readprops.merge!({ :name => myname,
+						instprops = { :name => myname,
 							:ensure => :present,
 							:region => reg,
 							:availability_zone => y['placement']['availabilityZone'] 
-						})
-						readprops[:instance_id] = y['instanceId'] if y['instanceId']
-						readprops[:instance_type] = y['instanceType'] if y['instanceType']
-						readprops[:key_name] = y['keyName'] if y['keyName']
-						readprops[:kernel_id] = y['kernelId'] if y['kernelId']
-						readprops[:image_id] = y['imageId'] if y['imageId']
-						readprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
-						readprops[:subnet_id] = y['subnetId'] if y['subnetId']
-						readprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
-						readprops[:ebs_optimized] = y['ebsOptimized'] if y['ebsOptimized']
-						readprops[:ip_address] = y['ipAddress'] if y['ipAddress']
-						readprops[:architecture] = y['architecture'] if y['architecture']
-						readprops[:dns_name] = y['dnsName'] if y['dnsName']
-						readprops[:private_dns_name] = y['privateDnsName'] if y['privateDnsName']
-						readprops[:root_device_type] = y['rootDeviceType'] if y['rootDeviceType']
-						readprops[:launch_time] = y['launchTime'] if y['launchTime']
-						readprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
-						readprops[:owner_id] = y['ownerId'] if y['ownerId']
-						readprops[:tags] = y['tagSet'] if y['tagSet']
-						readprops[:instance_state] = y['instanceState']['name'] if y['instanceState']['name']
-						readprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
-						readprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
-						allinstances << readprops
+						}
+						instprops[:instance_id] = y['instanceId'] if y['instanceId']
+						instprops[:instance_type] = y['instanceType'] if y['instanceType']
+						instprops[:key_name] = y['keyName'] if y['keyName']
+						instprops[:kernel_id] = y['kernelId'] if y['kernelId']
+						instprops[:image_id] = y['imageId'] if y['imageId']
+						instprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
+						instprops[:subnet_id] = y['subnetId'] if y['subnetId']
+						instprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
+						instprops[:ebs_optimized] = y['ebsOptimized'] if y['ebsOptimized']
+						instprops[:ip_address] = y['ipAddress'] if y['ipAddress']
+						instprops[:architecture] = y['architecture'] if y['architecture']
+						instprops[:dns_name] = y['dnsName'] if y['dnsName']
+						instprops[:private_dns_name] = y['privateDnsName'] if y['privateDnsName']
+						instprops[:root_device_type] = y['rootDeviceType'] if y['rootDeviceType']
+						instprops[:launch_time] = y['launchTime'] if y['launchTime']
+						instprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
+						instprops[:owner_id] = y['ownerId'] if y['ownerId']
+						instprops[:tags] = y['tagSet'] if y['tagSet']
+						instprops[:instance_state] = y['instanceState']['name'] if y['instanceState']['name']
+						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
+						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
+					
+						instprops.merge!(secprops)
+						allinstances << instprops
 					end
 				end	
 			else
@@ -112,41 +114,56 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		}
 
+		# lookup the imageid
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		response = compute.describe_images({ 'ImageId' => @resource[:image_id]}) 
+		raise "Sorry, I couldn't lookup image #{@resource[:image_id]}" if (response.status != 200)
+		aminame = response.body['imagesSet'][0]['name']
+		# Root device type, ebs or instance-store
+		amirootdevicetype = response.body['imagesSet'][0]['rootDeviceType']
+
 		[ :ip_address, :architecture, :dns_name, :private_dns_name, :root_device_type, :launch_time, :virtualization_type, :owner_id, :instance_state, :network_interfaces ].each {|a|	
 			info("Ignoring READONLY attribute #{a}") if (@resource[a])
 		}
 
 		# set up the options hash
-		options_hash['Placement.AvailabilityZone'] = @resource[:availability_zone] if @resource[:availability_zone]
-		options_hash['Placement.GroupName'] = @resource[:placement_group_name] if @resource[:placement_group_name]
-		options_hash['DisableApiTermination'] = @resource[:disable_api_termination] if @resource[:disable_api_termination]
-		options_hash['DisableApiTermination'] = @resource[:disable_api_termination] if @resource[:disable_api_termination]
+		options_hash['Placement.AvailabilityZone'] = @resource[:availability_zone].to_s if @resource[:availability_zone]
+		options_hash['Placement.GroupName'] = @resource[:placement_group_name].to_s if @resource[:placement_group_name]
+		options_hash['DisableApiTermination'] = @resource[:disable_api_termination].to_s if @resource[:disable_api_termination]
+		options_hash['DisableApiTermination'] = @resource[:disable_api_termination].to_s if @resource[:disable_api_termination]
 		options_hash['SecurityGroup'] = @resource[:security_group_names] if @resource[:security_group_names]
 		options_hash['SecurityGroupId'] = @resource[:security_group_ids] if @resource[:security_group_ids]
-		options_hash['InstanceInitiatedShutdownBehaviour'] = @resource[:instance_initiated_shutdown_behavior] if @resource[:instance_initiated_shutdown_behavior]
-		options_hash['InstanceType'] = @resource[:instance_type] if @resource[:instance_type]
-		options_hash['KernelId'] = @resource[:kernel_id] if @resource[:kernel_id]
-		options_hash['KeyName'] = @resource[:key_name] if @resource[:key_name]
+		options_hash['InstanceType'] = @resource[:instance_type].to_s if @resource[:instance_type]
+		options_hash['KernelId'] = @resource[:kernel_id].to_s if @resource[:kernel_id]
+		options_hash['KeyName'] = @resource[:key_name].to_s if @resource[:key_name]
 		options_hash['Monitoring.Enabled'] = @resource[:monitoring_enabled] if @resource[:monitoring_enabled]
-		options_hash['PrivateIpAddress'] = @resource[:private_ip_address] if @resource[:private_ip_address]
-		options_hash['RamdiskId'] = @resource[:ramdisk_id] if @resource[:ramdisk_id]
-		options_hash['SubnetId'] = @resource[:subnet_id] if @resource[:subnet_id]
-		options_hash['UserData'] = @resource[:user_data] if @resource[:user_data]
+		options_hash['PrivateIpAddress'] = @resource[:private_ip_address].to_s if @resource[:private_ip_address]
+		options_hash['RamdiskId'] = @resource[:ramdisk_id].to_s if @resource[:ramdisk_id]
+		options_hash['SubnetId'] = @resource[:subnet_id].to_s if @resource[:subnet_id]
+		options_hash['UserData'] = @resource[:user_data].to_s if @resource[:user_data]
 		options_hash['EbsOptimized'] = @resource[:ebs_optimized] if @resource[:ebs_optimized]
+		# ebs only options
+		if (amirootdevicetype == 'ebs')
+			options_hash['InstanceInitiatedShutdownBehavior'] = @resource[:instance_initiated_shutdown_behavior].to_s if @resource[:instance_initiated_shutdown_behavior]
+		end
 
 		# start the instance
 		notice "Creating new ec2instance '#{@resource[:name]}' from image #{@resource[:image_id]}"
+		info "#{@resource[:image_id]}: #{aminame}"
 		debug "compute.run_instances(#{@resource[:image_id]},1,1,options_hash)"
 		debug "options_hash (YAML):-\n#{options_hash.to_yaml}"
 
-		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		response = compute.run_instances(@resource[:image_id],1,1,options_hash)	
 		if (response.status == 200)
 			sleep 5
 
 			# Add the required tags...
 			instid = response.body['instancesSet'][0]['instanceId']
-			@resource['tags']['Name']="#{@resource[:name]}"
+			if (@resource[:tags])
+				@resource[:tags]['Name']=@resource[:name].to_s
+			else
+				@resource[:tags] = { 'Name' => @resource[:name].to_s }
+			end
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource['tags'])
 
@@ -168,7 +185,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 
 		debug "compute.terminate_instances(#{instance['instanceId']})"
-		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		response = compute.terminate_instances(instance['instanceId'])
 		if (response.status != 200)
 			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
@@ -257,7 +274,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(name)
 		debug "compute.describe_instances"
-		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		resp = compute.describe_instances	
 		if (resp.status == 200)
 			# check through the instances looking for one with a matching Name tag
@@ -300,7 +317,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def assign_tags(resourceid,taghash)
 		mytags={}
 		debug "compute.describe_tags"
-		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		resp=compute.describe_tags
 		if (resp.status == 200)
 			resp.body['tagSet'].each do |tags|
