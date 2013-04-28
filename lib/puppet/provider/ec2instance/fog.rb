@@ -2,7 +2,7 @@ require 'rubygems'
 require 'fog'
 require 'facter'
 require 'pp'
-require File.expandpath(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connetion.rb'))
+require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
 
 Puppet::Type.type(:ec2instance).provide(:fog) do
 	desc "The AWS Provider which implements the ec2instance type."
@@ -13,16 +13,13 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	mk_resource_methods
 
 	def self.instances
-		cred=get_access('default',true)
-		if (!cred[:aws_access_key_id] || !cred[:aws_secret_access_key])
-			return []
-		end
-		regions=cred[:regions] ? cred[:regions] : ['us-east-1','us-west-1','us-west-2','eu-west-1','ap-southeast-1','ap-southeast-2','ap-northeast-1','sa-east-1']
+		regions = PuppetX::Practicalclouds::Awsaccess.regions('default')
+		regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','ap-southeast-1','ap-southeast-2','ap-northeast-1','sa-east-1'] if (regions==[])
 
 		# get a list of instances in all of the regions we are configured for.
 		allinstances=[]
 		regions.each {|reg|	
-			compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(reg,'default')	
+			compute = PuppetX::Practicalclouds::Awsaccess.connect(reg,'default')	
 			debug "Querying region #{reg}"
 			resp = compute.describe_instances
 			if (resp.status == 200)
@@ -60,7 +57,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						readprops[:instance_state] = y['instanceState']['name'] if y['instanceState']['name']
 						readprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						readprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
-						pp readprops
 						allinstances << readprops
 					end
 				end	
@@ -94,13 +90,13 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
       if (@resource[:availability_zone])
          return @resource[:availability_zone].gsub(/.$/,'')
       elsif (@resource[:region])
-         return = @resource[:region]
+         return @resource[:region]
       end
 		raise "Sorry, I could not work out my region"
 	end
 
 	def myaccess
-      name = (@resource[:awsaccess]) ? @resource[:awsaccess] : 'default')
+      name = (@resource[:awsaccess]) ? @resource[:awsaccess] : 'default'
 		name
 	end
 
@@ -142,7 +138,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		notice "Creating new ec2instance '#{@resource[:name]}' from image #{@resource[:image_id]}"
 		debug "compute.run_instances(#{@resource[:image_id]},1,1,options_hash)"
 		debug "options_hash (YAML):-\n#{options_hash.to_yaml}"
-		compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+
+		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		response = compute.run_instances(@resource[:image_id],1,1,options_hash)	
 		if (response.status == 200)
 			sleep 5
@@ -169,8 +166,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		else
 			raise "Sorry I could not lookup the instance with name #{@resource[:name]}" if (!instance)
 		end
+
 		debug "compute.terminate_instances(#{instance['instanceId']})"
-		compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		response = compute.terminate_instances(instance['instanceId'])
 		if (response.status != 200)
 			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
@@ -259,7 +257,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(name)
 		debug "compute.describe_instances"
-		compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		resp = compute.describe_instances	
 		if (resp.status == 200)
 			# check through the instances looking for one with a matching Name tag
@@ -302,7 +300,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def assign_tags(resourceid,taghash)
 		mytags={}
 		debug "compute.describe_tags"
-		compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		compute = Puppet::Puppet_x::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		resp=compute.describe_tags
 		if (resp.status == 200)
 			resp.body['tagSet'].each do |tags|
