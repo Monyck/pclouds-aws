@@ -12,17 +12,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	mk_resource_methods
 
-	# method to sort out the region and get an access object.
-	def get_access
-		if (@resource[:availability_zone])
-			region = @resource[:availability_zone].gsub(/.$/,'')
-		elsif (@resource[:region])
-			region = @resource[:region]
-		end
-		name = (@resource[:awsaccess]) ? @resource[:awsaccess] : 'default')
-		Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(region,name)
-	end
-
 	def self.instances
 		cred=get_access('default',true)
 		if (!cred[:aws_access_key_id] || !cred[:aws_secret_access_key])
@@ -33,8 +22,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		# get a list of instances in all of the regions we are configured for.
 		allinstances=[]
 		regions.each {|reg|	
-			#@compute = {}
-			#@compute[reg] = Fog::Compute.new(:provider => 'aws', :aws_access_key_id => cred[:aws_access_key_id], :aws_secret_access_key => cred[:aws_secret_access_key], :region => "#{reg}")	
 			compute = Puppet::Puppet_X::Practicalclouds::Awsaccess.connect(reg,'default')	
 			debug "Querying region #{reg}"
 			resp = compute.describe_instances
@@ -82,11 +69,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		}
 
-		# Simple accessor for getting an existing connection object to an AWS Region
-		def self.awsconnection(region)
-			@compute[region]
-		end
-
 		# return the list of instances
 		#puts "I found these instances..."
 		#pp allinstances
@@ -121,24 +103,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
       name = (@resource[:awsaccess]) ? @resource[:awsaccess] : 'default')
 		name
 	end
-
-	#def initialize(value={})
-	#	debug "Entered initialize..."
-	#	pp value
-	#	super(value)
-   #   # set up awsaccess credentials
-	#	debug "Initialize: setting up AWS access credentials..."
-   #   @cred={}
-   #   if value['awsaccess'] then
-   #      @cred=Puppet::Type::Ec2instance::ProviderFog::get_access(value['awsaccess'],false)
-   #   else
-   #      @cred=Puppet::Type::Ec2instance::ProviderFog::get_access('default',true)
-   #   end
-   #   if (!@cred[:aws_access_key_id] || !@cred[:aws_secret_access_key])
-   #      fail "Can't find any awsaccess resources to use to connect to amazon.  Please configure at least one awsaccess resource!"
-   #   end
-	#	debug "Set the access credentials ok..."
-	#end
 
 	def create
 		#complex_params = [ :security_group_names, :security_group_ids, :block_device_mapping ]
