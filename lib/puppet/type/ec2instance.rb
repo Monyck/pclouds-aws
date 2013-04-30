@@ -21,24 +21,38 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newparam(:awsaccess) do
 		desc "Optional name of an awsaccess resource to use for managing this resource"
+		validate do |value|
+			# we must have a matching awsaccess resource in the catalog
+			found=false
+			@resource.catalog.resources.each do |d|
+            if (d.class.to_s == "Puppet::Type::Awsaccess")
+					found=true if (d.name == value)
+            end
+        	end 
+			raise ArgumentError, "Sorry, you need to have a matching awsaccess resource in your manifest when specifying the awsaccess attribute!" if (found==false)
+		end
 	end
 
-	newparam(:min_count) do
-		desc "The minimum number of instances to launch."
-		defaultto '1'
-		newvalues(/^\d+$/)
-	end
+	#newparam(:min_count) do
+	#	desc "The minimum number of instances to launch."
+	#	defaultto '1'
+	#	newvalues(/^\d+$/)
+	#end
 
-	newparam(:max_count) do
-		desc "The maximum number of instances to launch."
-		defaultto '1'
-		newvalues(/^\d+$/)
-	end
+	#newparam(:max_count) do
+	#	desc "The maximum number of instances to launch."
+	#	defaultto '1'
+	#	newvalues(/^\d+$/)
+	#end
 
 	newparam(:wait) do
 		desc "Whether to wait for the instance to finish starting up before returning from the provider."
 		newvalues(:true, :false)
 		defaultto :false
+	end
+
+	newparam(:placement_group_name) do
+		desc "The placement group for the instance"
 	end
 
 	newparam(:max_wait) do
@@ -124,12 +138,16 @@ Puppet::Type.newtype(:ec2instance) do
 
 	end
 
-	newproperty(:ip_address) do
-		desc "READONLY: The public IP address of the instance"
+	newproperty(:instance_id) do
+		desc "READONLY: The amazon AWS instanceId of the instance"
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
+	end
+
+	newproperty(:ip_address) do
+		desc "READONLY: The public IP address of the instance"
+		munge do |v|
 			"readonly"
 		end
 	end
@@ -139,17 +157,11 @@ Puppet::Type.newtype(:ec2instance) do
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
-			"readonly"
-		end
 	end
 
 	newproperty(:dns_name) do
 		desc "READONLY: The instances public DNS name"
 		munge do |v|
-			"readonly"
-		end
-		unmunge do |v|
 			"readonly"
 		end
 	end
@@ -159,17 +171,11 @@ Puppet::Type.newtype(:ec2instance) do
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
-			"readonly"
-		end
 	end
 
 	newproperty(:root_device_type) do
 		desc "READONLY: The type of the root device"
 		munge do |v|
-			"readonly"
-		end
-		unmunge do |v|
 			"readonly"
 		end
 	end
@@ -179,17 +185,11 @@ Puppet::Type.newtype(:ec2instance) do
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
-			"readonly"
-		end
 	end
 
 	newproperty(:virtualization_type) do
 		desc "READONLY: The type of virtualization"
 		munge do |v|
-			"readonly"
-		end
-		unmunge do |v|
 			"readonly"
 		end
 	end
@@ -199,9 +199,6 @@ Puppet::Type.newtype(:ec2instance) do
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
-			"readonly"
-		end
 	end
 
 	newproperty(:instance_state) do
@@ -209,17 +206,11 @@ Puppet::Type.newtype(:ec2instance) do
 		munge do |v|
 			"readonly"
 		end
-		unmunge do |v|
-			"readonly"
-		end
 	end
 
 	newproperty(:network_interfaces, :array_matching => :all) do
 		desc "READONLY: Network inferface information"
 		munge do |v|
-			"readonly"
-		end
-		unmunge do |v|
 			"readonly"
 		end
 	end
@@ -292,11 +283,10 @@ Puppet::Type.newtype(:ec2instance) do
 	#end
 
 	# --------------------------------------------------------------------------------------------------------------
-	# Processing 
-
-	# Validate that the :availability_zone and :region are correct if both specified.
+	# Validation and autorequires... 
 
 	validate do
+		# Validate that the :availability_zone and :region are correct if both specified.
 		if (self[:region] && self[:availability_zone]) 
 			if (self[:region] != self[:availability_zone].gsub(/.$/,''))
 				raise ArgumentError , "ec2instance: Sorry, availability_zone #{self[:availability_zone]} is in region #{self[:availability_zone].gsub(/.$/,'')}.  Please leave the 'region' blank or correct it."

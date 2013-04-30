@@ -25,6 +25,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (resp.status == 200)
 				# check through the instances looking for one with a matching Name tag
 				resp.body['reservationSet'].each do |x|
+					pp x
 					secprops={}
 					secprops[:security_group_names] = x['groupSet']
 					secprops[:security_group_ids] = x['groupIds']
@@ -57,6 +58,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:instance_state] = y['instanceState']['name'] if y['instanceState']['name']
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
+						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
 					
 						instprops.merge!(secprops)
 						allinstances << instprops
@@ -93,6 +95,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
          return @resource[:availability_zone].gsub(/.$/,'')
       elsif (@resource[:region])
          return @resource[:region]
+		elsif (@property_hash[:region])
+			return @property_hash[:region]
       end
 		raise "Sorry, I could not work out my region"
 	end
@@ -130,7 +134,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		options_hash['Placement.AvailabilityZone'] = @resource[:availability_zone].to_s if @resource[:availability_zone]
 		options_hash['Placement.GroupName'] = @resource[:placement_group_name].to_s if @resource[:placement_group_name]
 		options_hash['DisableApiTermination'] = @resource[:disable_api_termination].to_s if @resource[:disable_api_termination]
-		options_hash['DisableApiTermination'] = @resource[:disable_api_termination].to_s if @resource[:disable_api_termination]
 		options_hash['SecurityGroup'] = @resource[:security_group_names] if @resource[:security_group_names]
 		options_hash['SecurityGroupId'] = @resource[:security_group_ids] if @resource[:security_group_ids]
 		options_hash['InstanceType'] = @resource[:instance_type].to_s if @resource[:instance_type]
@@ -157,13 +160,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		if (response.status == 200)
 			sleep 5
 
-			# Add the required tags...
 			instid = response.body['instancesSet'][0]['instanceId']
-			if (@resource[:tags])
-				@resource[:tags]['Name']=@resource[:name].to_s
-			else
-				@resource[:tags] = { 'Name' => @resource[:name].to_s }
-			end
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource['tags'])
 
@@ -191,7 +188,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
 		else
 			if (@resource[:wait] == :true)
-				wait_state(@resource[:name],'terminated',@resource[:max_wait])
+				wait_state(@resource[:name],'terminated',@resource[:max_wait].to_i)
 			end
 			notice "Removing Name tag #{@resource[:name]} from #{instance['instanceId']}"
 			debug "compute.delete_tags(#{instance['instanceId']},{ 'Name' => #{@resource[:name]}})"
@@ -293,6 +290,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	# generic method to wait for an array of instances to reach a desired state...
 	def wait_state(name,desired_state,max)
+		max=max.to_i
+
 		elapsed_wait=0
 		check = instanceinfo(name)
 		if ( check )
