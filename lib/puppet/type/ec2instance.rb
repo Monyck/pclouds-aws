@@ -65,6 +65,18 @@ Puppet::Type.newtype(:ec2instance) do
 		desc "The user data which you want to pass the instance when it boots in string format."
 	end
 
+	newparam(:disable_api_termination) do
+		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
+		newvalues(:true, :false)
+		defaultto :false
+	end
+
+	newparam(:instance_initiated_shutdown_behavior) do
+		desc "Whether the instance stops or terminates on instance-initiated shutdown."
+		newvalues(:stop, :terminate)
+		defaultto :stop
+	end
+
 	# --------------------------------------------------------------------------------------------------------------
 	# Properties  
 
@@ -135,104 +147,129 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newproperty(:private_ip_address) do
 		desc "[EC2-VPC] You can optionally use this parameter to assign the instance a specific available IP address from the IP address range of the subnet as the primary IP address."
-
 	end
 
 	newproperty(:instance_id) do
 		desc "READONLY: The amazon AWS instanceId of the instance"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:ip_address) do
 		desc "READONLY: The public IP address of the instance"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:architecture) do
 		desc "READONLY: i386 or x86_64"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:dns_name) do
 		desc "READONLY: The instances public DNS name"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:private_dns_name) do
 		desc "READONLY: The instances private DNS name"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:root_device_type) do
 		desc "READONLY: The type of the root device"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:launch_time) do
 		desc "READONLY: The time an instance was launched"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:virtualization_type) do
 		desc "READONLY: The type of virtualization"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:owner_id) do
 		desc "READONLY: The AWS ID of the Owner"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:instance_state) do
 		desc "READONLY: The state of the ec2instance"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
 	newproperty(:network_interfaces, :array_matching => :all) do
 		desc "READONLY: Network inferface information"
 		munge do |v|
-			"readonly"
+			nil
+		end
+		unmunge do |v|
+			nil
 		end
 	end
 
-	newproperty(:tags, :array_matching => :all) do
+	newproperty(:tags ) do
 		desc "A set of tags which have been set on the object.  There can only be 10 tags per object including the Name tag"
-		validate do |value|
-			puts "tags value"
-			pp value
+		#validate do |value|
+		#	puts "tags value"
+		#	pp value
+		#end
+		munge do |value|
+			temphash=value	
+			temphash['Name']=@resource[:name]
+			temphash
 		end
-	end
-
-	newproperty(:disable_api_termination) do
-		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
-		newvalues(:true, :false)
-		defaultto :false
-	end
-
-	newproperty(:instance_initiated_shutdown_behavior) do
-		desc "Whether the instance stops or terminates on instance-initiated shutdown."
-		newvalues(:stop, :terminate)
-		defaultto :stop
 	end
 
 	newproperty(:ebs_optimized) do

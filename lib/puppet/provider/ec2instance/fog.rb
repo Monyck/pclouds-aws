@@ -25,7 +25,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (resp.status == 200)
 				# check through the instances looking for one with a matching Name tag
 				resp.body['reservationSet'].each do |x|
-					pp x
 					secprops={}
 					secprops[:security_group_names] = x['groupSet']
 					secprops[:security_group_ids] = x['groupIds']
@@ -160,6 +159,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		if (response.status == 200)
 			sleep 5
 
+			# The Name tag is already set by munge
 			instid = response.body['instancesSet'][0]['instanceId']
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource['tags'])
@@ -320,10 +320,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		resp=compute.describe_tags
 		if (resp.status == 200)
 			resp.body['tagSet'].each do |tags|
-				tags.each do |tag|
-					if (tag['resourceid'] == resourceid)
-						mytags[tag['key']] = tag['value']
-					end
+				if (tags['resourceId'] == resourceid)
+					debug "read tag: #{tags['key']} = #{tags['value']}"
+					mytags["#{tags['key']}"] = tags['value']
 				end
 			end
 		else
@@ -333,21 +332,23 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		# delete any tags which are not in the tag hash or havedifferent values
 		if (mytags != {})
 			deletetags={}
-			mytags.each do |tag|
-				if (tag['value'] != taghash[tag['key']]) 
-					debug "Deleting tag #{tag['key']} = #{tag['value']} from #{resourceid}"
-					deletetags[tag['key']] = tag['value']
-					mytags.delete(tag['key'])
+			mytags.each do |k,v|
+				if (taghash[k] != v) 
+					debug "Deleting tag #{k} = #{v} from #{resourceid}"
+					deletetags[k] = v
+					mytags.delete(k)
 				end
 			end
-			debug "compute.delete_tags(#{resourceid},deletetags)"
-			debug "deletetags (YAML):-\n#{deletetags.to_yaml}"
-			resp=compute.delete_tags(resourceid,deletetags)
-			if (resp.status != 200)
-				raise "I couldn't delete the tags!"
+			if (deletetags != {})
+				debug "compute.delete_tags(#{resourceid},deletetags)"
+				debug "deletetags (YAML):-\n#{deletetags.to_yaml}"
+				resp=compute.delete_tags(resourceid,deletetags)
+				if (resp.status != 200)
+					raise "I couldn't delete the tags!"
+				end
 			end
 		end
-	
+
 		# now add the new tags
 		if (taghash != {})
 			addtags={}
@@ -357,12 +358,14 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					addtags[t]=v if (!mytags[t])
 				end
 			end
-			debug "compute.create_tags(#{resourceid},addtags)"
-			debug "addtags (YAML):-\n#{addtags.to_yaml}"
-         response = compute.create_tags(resourceid,addtags)
-         if (response.status != 200)
-            raise "I couldn't add tags to #{resourceid}"
-         end
+			if (addtags != {})
+				debug "compute.create_tags(#{resourceid},addtags)"
+				debug "addtags (YAML):-\n#{addtags.to_yaml}"
+         	response = compute.create_tags(resourceid,addtags)
+         	if (response.status != 200)
+            	raise "I couldn't add tags to #{resourceid}"
+         	end
+			end
 		end
 	end
 
