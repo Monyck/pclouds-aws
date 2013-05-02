@@ -32,10 +32,10 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						myname = y['tagSet']['Name'] ? y['tagSet']['Name'] : y['instanceId']
 						debug "Found ec2instance instance : #{myname}"
 						instprops = { :name => myname,
-							:ensure => :present,
 							:region => reg,
 							:availability_zone => y['placement']['availabilityZone'] 
 						}
+						instprops[:ensure] = y['instanceState']['name'] if y['instanceState']['name']
 						instprops[:instance_id] = y['instanceId'] if y['instanceId']
 						instprops[:instance_type] = y['instanceType'] if y['instanceType']
 						instprops[:key_name] = y['keyName'] if y['keyName']
@@ -54,7 +54,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
 						instprops[:owner_id] = y['ownerId'] if y['ownerId']
 						instprops[:tags] = y['tagSet'] if y['tagSet']
-						instprops[:instance_state] = y['instanceState']['name'] if y['instanceState']['name']
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
 						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
@@ -85,8 +84,69 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
+	# ensureable replacement: Getter for custom 'ensure' property
+	# allow different states than 'present' and 'absent'
+	def ensure
+		if (@property_hash[:ensure])
+			debug "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
+			@property_hash[:ensure]
+		else
+			:absent
+		end
+	end
+
+	# ensurable replacement: decide what to do when requested to change between our states.
+	# Call our exists?, create and destory methods to do the work as though we are ensurable.
+	def ensure=(value)
+		debug "I need to proces #{@resource[:name]} to #{value}"
+		case value.to_s
+		when 'pending','shutting-down'
+			fail("Sorry! You are not allowed to set ec2instances into the 'pending' or 'stutting-down' states.")
+		when 'terminated', 'absent'
+			if (exists?)
+				case @property_hash[:ensure]
+				when 'pending', 'running'
+					destroy
+				when 'shutting-down'
+					notice "Instance #{@property_hash[:name]} is already shutting-down."
+				when 'terminated'
+					notice "Consider using ensure 'terminated' instead of 'absent' to prevent these notice messages"
+				else
+					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
+				end
+			end
+		when 'running','present'
+			if (exists?)
+				case @property_hash[:ensure]
+				when 'running'
+					notice "Consider using ensure 'running' instead of 'present' to prevent these notice messages"
+				when 'shutting-down'
+					debug "#{@property_hash[:name]} is shutting_down"
+					notice "We should do something about whether it is stopping or terminating"
+				when 'terminated'
+					debug "Found a terminated instance with my name : removing and starting a new one"
+					destroy
+					create
+				when 'pending'
+					notice "Instance #{property_hash[:name]} : #{property_hash[:instance_id]} is already starting up"
+				else
+					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
+				end
+			else
+				puts "it doesn't exist"
+				puts "exists = #{exists?}"
+				debug "No instance #{@resource[:name]} exists, create a new one.."
+				create
+			end
+		else
+			fail "I couldn't match ensure value #{value}"
+		end
+	end
+			
    def exists?
-      @property_hash[:ensure] == :present
+		debug "Checking if #{@resource[:name]} exists"
+		return nil if (!@property_hash)
+		(@property_hash[:ensure]) ? 0 : nil
    end
 
 	def myregion
@@ -106,7 +166,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def create
-		#complex_params = [ :security_group_names, :security_group_ids, :block_device_mapping ]
 		options_hash={}
 
 		# check required parameters...
@@ -125,7 +184,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		# Root device type, ebs or instance-store
 		amirootdevicetype = response.body['imagesSet'][0]['rootDeviceType']
 
-		[ :ip_address, :architecture, :dns_name, :private_dns_name, :root_device_type, :launch_time, :virtualization_type, :owner_id, :instance_state, :network_interfaces ].each {|a|	
+		[ :ip_address, :architecture, :dns_name, :private_dns_name, :root_device_type, :launch_time, :virtualization_type, :owner_id, :network_interfaces ].each {|a|	
 			info("Ignoring READONLY attribute #{a}") if (@resource[a])
 		}
 
@@ -174,28 +233,26 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def destroy
-		instance = instanceinfo(@resource[:name])
-		if (instance)
-			notice "Terminating ec2 instance #{@resource[:name]} : #{instance['instanceId']}"
-		else
-			raise "Sorry I could not lookup the instance with name #{@resource[:name]}" if (!instance)
-		end
-
-		debug "compute.terminate_instances(#{instance['instanceId']})"
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-		response = compute.terminate_instances(instance['instanceId'])
-		if (response.status != 200)
-			raise "I couldn't terminate ec2 instance #{instance['instanceId']}"
-		else
-			if (@resource[:wait] == :true)
-				wait_state(@resource[:name],'terminated',@resource[:max_wait].to_i)
-			end
-			notice "Removing Name tag #{@resource[:name]} from #{instance['instanceId']}"
-			debug "compute.delete_tags(#{instance['instanceId']},{ 'Name' => #{@resource[:name]}})"
-			response = @compute.delete_tags(instance['instanceId'],{ 'Name' => @resource[:name]}) 
+		if (@property_hash[:ensure] =~ /^(running|pending)$/)
+			notice "Terminating ec2 instance #{@resource[:name]} : #{@property_hash[:instance_id]}"
+			debug "compute.terminate_instances(#{@property_hash[:instance_id]})"
+			response = compute.terminate_instances(@property_hash[:instance_id])
 			if (response.status != 200)
-				raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
+				raise "I couldn't terminate ec2 instance #{@property_hash[:instance_id]}"
+			else
+				if (@resource[:wait] == :true)
+					wait_state(@resource[:name],'terminated',@resource[:max_wait].to_i)
+				end
 			end
+		else
+			notice "Instance #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
+		end
+		notice "Removing Name tag #{@resource[:name]} from #{@property_hash[:instance_id]}"
+		debug "compute.delete_tags(#{@property_hash[:instance_id]},{ 'Name' => #{@resource[:name]}})"
+		response = compute.delete_tags(@property_hash[:instance_id],{ 'Name' => @resource[:name]}) 
+		if (response.status != 200)
+			raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
 		end
 	end
 

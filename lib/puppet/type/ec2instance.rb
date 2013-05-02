@@ -7,8 +7,12 @@ require 'pp'
 Puppet::Type.newtype(:ec2instance) do
 	@doc = "EC2 Instances"
 
-	# Allow to be ensurable
-	ensurable
+	# I'm not going to use ensurable because I want to add an extra 'stopped' ensure state...
+	newproperty(:ensure) do
+		desc "Ensure that an ec2instance is 'running', 'stopped' or 'terminated'"
+		newvalues(:running, :stopped, :terminated, :present, :absent)
+		isrequired
+	end
 
 	# --------------------------------------------------------------------------------------------------------------
 	# Parameters  
@@ -231,16 +235,6 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newproperty(:owner_id) do
 		desc "READONLY: The AWS ID of the Owner"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:instance_state) do
-		desc "READONLY: The state of the ec2instance"
 		munge do |v|
 			nil
 		end
