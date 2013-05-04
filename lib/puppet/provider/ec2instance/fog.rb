@@ -10,7 +10,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Only allow the provider if fog is installed.
 	commands :fog => 'fog'
 
-	mk_resource_methods
+	# We can't use 'mk_resource_methods' because we need our own accessors which return the value
+	# being requested if the resource does not exist. 
+	#mk_resource_methods
 
 	def self.instances
 		regions = PuppetX::Practicalclouds::Awsaccess.regions('default')
@@ -85,13 +87,20 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	# ensureable replacement: Getter for custom 'ensure' property
-	# allow different states than 'present' and 'absent'
+	# manipulate the values which mean the same thing and when someone
+	# is specifying an absent or terminated instance that does not exist.
 	def ensure
-		if (@property_hash[:ensure])
-			debug "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
-			@property_hash[:ensure]
+		if (@resource[:ensure] == :terminated && @property_hash == {})
+			return :terminated
+		elsif (@resource[:ensure] == :absent && @property_hash == {})
+			return :absent
+		elsif (@resource[:ensure] == :absent && @property_hash[:ensure] =~ /^(stopped|terminated)/)
+			return @resource[:ensure]
+		elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^(running)/)
+			return @resource[:ensure]
 		else
-			:absent
+			returnval=(@property_hash[:ensure]) ? @property_hash[:ensure] : nil
+			returnval
 		end
 	end
 
@@ -108,9 +117,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				when 'pending', 'running'
 					destroy
 				when 'shutting-down'
-					notice "Instance #{@property_hash[:name]} is already shutting-down."
-				when 'terminated'
-					notice "Consider using ensure 'terminated' instead of 'absent' to prevent these notice messages"
+					info "Instance #{@property_hash[:name]} is already shutting-down."
 				else
 					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
 				end
@@ -118,23 +125,19 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		when 'running','present'
 			if (exists?)
 				case @property_hash[:ensure]
-				when 'running'
-					notice "Consider using ensure 'running' instead of 'present' to prevent these notice messages"
 				when 'shutting-down'
 					debug "#{@property_hash[:name]} is shutting_down"
 					notice "We should do something about whether it is stopping or terminating"
 				when 'terminated'
-					debug "Found a terminated instance with my name : removing and starting a new one"
+					debug "Found a terminated instance #{property_hash[:instance_id]} with name #{@property_hash[:name]} : removing and starting a new one"
 					destroy
 					create
 				when 'pending'
-					notice "Instance #{property_hash[:name]} : #{property_hash[:instance_id]} is already starting up"
+					info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
 				else
 					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
 				end
 			else
-				puts "it doesn't exist"
-				puts "exists = #{exists?}"
 				debug "No instance #{@resource[:name]} exists, create a new one.."
 				create
 			end
@@ -146,7 +149,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
    def exists?
 		debug "Checking if #{@resource[:name]} exists"
 		return nil if (!@property_hash)
-		(@property_hash[:ensure]) ? 0 : nil
+		(@property_hash[:ensure]) ? 1 : nil
    end
 
 	def myregion
@@ -202,10 +205,10 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		options_hash['RamdiskId'] = @resource[:ramdisk_id].to_s if @resource[:ramdisk_id]
 		options_hash['SubnetId'] = @resource[:subnet_id].to_s if @resource[:subnet_id]
 		options_hash['UserData'] = @resource[:user_data].to_s if @resource[:user_data]
-		options_hash['EbsOptimized'] = @resource[:ebs_optimized] if @resource[:ebs_optimized]
 		# ebs only options
 		if (amirootdevicetype == 'ebs')
 			options_hash['InstanceInitiatedShutdownBehavior'] = @resource[:instance_initiated_shutdown_behavior].to_s if @resource[:instance_initiated_shutdown_behavior]
+			options_hash['EbsOptimized'] = @resource[:ebs_optimized] if @resource[:ebs_optimized]
 		end
 
 		# start the instance
@@ -257,30 +260,162 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	#---------------------------------------------------------------------------------------------------
-	# Properties which can't be changed...
+	# Properties 
+
+	def availability_zone
+		(@property_hash == {}) ? @resource[:availability_zone] : @property_hash[:availability_zone] 
+	end
 
 	def availability_zone=(value)
 		fail "Sorry you can't change the availability_zone of a running ec2instance"
+	end
+
+	def region
+		(@property_hash == {}) ? @resource[:region] : @property_hash[:region] 
 	end
 
 	def region=(value)
 		fail "Sorry you can't change the region of a running ec2instance"
 	end
 
+	def instance_type
+		(@property_hash == {}) ? @resource[:instance_type] : @property_hash[:instance_type] 
+	end
+
 	def instance_type=(value)
 		fail "Sorry you can't change the instance_type of a running ec2instance"
 	end
 
-	def image_id=(value)
-		fail "Sorry you can't change the image_id of a running ec2instance"
+	def instance_id
+		(@property_hash == {}) ? @resource[:instance_id] : @property_hash[:instance_id] 
+	end
+
+	def instance_id=(value)
+		fail "Sorry you can't change the instance_id of a running ec2instance"
+	end
+
+	def image_id
+		(@property_hash == {}) ? @resource[:image_id] : @property_hash[:image_id] 
 	end
 
 	def image_id=(value)
 		fail "Sorry you can't change the image_id of a running ec2instance"
+	end
+
+	def subnet_id
+		(@property_hash == {}) ? @resource[:subnet_id] : @property_hash[:subnet_id] 
 	end
 
 	def subnet_id=(value)
 		fail "Sorry you can't change the subnet_id of a running ec2instance"
+	end
+
+	def ebs_optimized
+		if (@property_hash == {})
+			@resource[:ebs_optimized]
+		else
+			(@property_hash[:root_device_type] == 'ebs') ? @property_hash[:root_device_type].to_sym : :false
+		end
+	end
+
+	def ebs_optimized=(value)
+		fail "Sorry you can't change the ebs_optimized of a running ec2instance"
+	end
+
+	def key_name
+		(@property_hash == {}) ? @resource[:key_name] : @property_hash[:key_name] 
+	end
+
+	def key_name=(value)
+		fail "Sorry you can't change the key_name of a running ec2instance"
+	end
+
+	def virtualization_type
+		(@property_hash == {}) ? @resource[:virtualization_type] : @property_hash[:virtualization_type] 
+	end
+
+	def virtualization_type=(value)
+		fail "Sorry you can't change the virtualization_type of a running ec2instance"
+	end
+
+	def private_ip_address
+		(@property_hash == {}) ? @resource[:private_ip_address] : @property_hash[:private_ip_address] 
+	end
+
+	def private_ip_address=(value)
+		fail "Sorry you can't change the private_ip_address of a running ec2instance"
+	end
+
+	def ip_address
+		(@property_hash == {}) ? @resource[:ip_address] : @property_hash[:ip_address] 
+	end
+
+	def ip_address=(value)
+		fail "Sorry you can't change the ip_address of a running ec2instance"
+	end
+
+	def architecture
+		(@property_hash == {}) ? @resource[:architecture] : @property_hash[:architecture] 
+	end
+
+	def architecture=(value)
+		fail "Sorry you can't change the architecture of a running ec2instance"
+	end
+
+	def dns_name
+		(@property_hash == {}) ? @resource[:dns_name] : @property_hash[:dns_name] 
+	end
+
+	def dns_name=(value)
+		fail "Sorry you can't change the dns_name of a running ec2instance"
+	end
+
+	def private_dns_name
+		(@property_hash == {}) ? @resource[:private_dns_name] : @property_hash[:private_dns_name] 
+	end
+
+	def private_dns_name=(value)
+		fail "Sorry you can't change the private_dns_name of a running ec2instance"
+	end
+
+	def root_device_type
+		(@property_hash == {}) ? @resource[:root_device_type] : @property_hash[:root_device_type] 
+	end
+
+	def root_device_type=(value)
+		fail "Sorry you can't change the root_device_type of a running ec2instance"
+	end
+
+	def launch_time
+		(@property_hash == {}) ? @resource[:launch_time] : @property_hash[:launch_time] 
+	end
+
+	def launch_time=(value)
+		fail "Sorry you can't change the launch_time of a running ec2instance"
+	end
+
+	def owner_id
+		(@property_hash == {}) ? @resource[:owner_id] : @property_hash[:owner_id] 
+	end
+
+	def owner_id=(value)
+		fail "Sorry you can't change the owner_id of a running ec2instance"
+	end
+
+	def network_interfaces
+		(@property_hash == {}) ? @resource[:network_interfaces] : @property_hash[:network_interfaces] 
+	end
+
+	def network_interfaces=(value)
+		fail "Sorry you can't change the network_interfaces of a running ec2instance"
+	end
+
+	def block_device_mapping
+		(@property_hash == {}) ? @resource[:block_device_mapping] : @property_hash[:block_device_mapping] 
+	end
+
+	def block_device_mapping=(value)
+		fail "Sorry you can't change the block_device_mapping of a running ec2instance"
 	end
 
 	#---------------------------------------------------------------------------------------------------
@@ -298,24 +433,48 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
         #   'SourceDestCheck.Value'<~Boolean> - New sourcedestcheck value
         #   'GroupId'<~Array> - One or more groups to add instance to (VPC only)
 
+	def security_group_names
+		(@property_hash == {}) ? @resource[:security_group_names] : @property_hash[:security_group_names] 
+   end
+
 	def security_group_names=(value)
 		debug "TODO: Modify the assigned security groups.."
+   end
+
+	def security_group_ids
+		(@property_hash == {}) ? @resource[:security_group_ids] : @property_hash[:security_group_ids] 
    end
 
 	def security_group_ids=(value)
 		debug "TODO: Modify the assigned security groups.."
    end
 
-	def kernel_value=(value)
+	def kernel_id
+		(@property_hash == {}) ? @resource[:kernel_id] : @property_hash[:kernel_id] 
+   end
+
+	def kernel_id=(value)
 		debug "TODO: Modify the kernel id"
    end
 
-	def ramdisk_value=(value)
+	def ramdisk_id
+		(@property_hash == {}) ? @resource[:ramdisk_id] : @property_hash[:ramdisk_id] 
+   end
+
+	def ramdisk_id=(value)
 		debug "TODO: Modify the ramdisk id"
+   end
+
+	def monitoring_enabled
+		(@property_hash == {}) ? @resource[:monitoring_enabled] : @property_hash[:monitoring_enabled] 
    end
 
 	def monitoring_enabled=(value)
 		debug "TODO: Enable/disable monitoring..."
+   end
+
+	def tags
+		(@property_hash == {}) ? @resource[:tags] : @property_hash[:tags] 
    end
 
 	def tags=(value)
@@ -324,6 +483,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		debug "Actual tags (YAML):-\n#{@property_hash[:tags].to_yaml}"
 		assign_tags(@property_hash[:instance_id],value)
 	end
+
+	#---------------------------------------------------------------------------------------------------
+	# Helper Methods
 
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(name)
