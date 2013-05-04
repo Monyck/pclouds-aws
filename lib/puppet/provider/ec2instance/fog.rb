@@ -46,7 +46,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
 						instprops[:subnet_id] = y['subnetId'] if y['subnetId']
 						instprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
-						instprops[:ebs_optimized] = y['ebsOptimized'] if y['ebsOptimized']
 						instprops[:ip_address] = y['ipAddress'] if y['ipAddress']
 						instprops[:architecture] = y['architecture'] if y['architecture']
 						instprops[:dns_name] = y['dnsName'] if y['dnsName']
@@ -59,9 +58,15 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
 						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
+						if (instprops[:root_device_type] == 'ebs')
+							instprops[:ebs_optimized] = y['ebsOptimized'].to_s
+						end
 					
 						instprops.merge!(secprops)
-						allinstances << instprops
+	
+						if (instprops[:ensure] != 'terminated' || (instprops['tagSet'] && instprops['tagSet']['Name']))
+							allinstances << instprops
+						end
 					end
 				end	
 			else
@@ -99,8 +104,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^(running)/)
 			return @resource[:ensure]
 		else
-			returnval=(@property_hash[:ensure]) ? @property_hash[:ensure] : nil
-			returnval
+			(@property_hash[:ensure]) ? @property_hash[:ensure] : :absent
 		end
 	end
 
@@ -219,18 +223,25 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 		response = compute.run_instances(@resource[:image_id],1,1,options_hash)	
 		if (response.status == 200)
+			debug "Instance created ok."
 			sleep 5
 
-			# The Name tag is already set by munge
+			# Set the Name tag to the resource name
+			if (!@resource[:tags])
+				@resource[:tags] = { 'Name' => @resource[:name] }
+			else
+				@resource[:tags]['Name'] = @resource[:name]
+			end
 			instid = response.body['instancesSet'][0]['instanceId']
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
-			assign_tags(instid,@resource['tags'])
+			assign_tags(instid,@resource[:tags])
 
 			# optionally wait for the instance to be "running"
 			if (@resource[:wait] == :true)
 				wait_state(instid,'running',@resource[:max_wait])
 			end
 		else
+			debug "The compute.run_instances call failed!"
 			raise "I couldn't create the ec2 instance, sorry! API Error!"
 		end
 	end
@@ -314,7 +325,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		if (@property_hash == {})
 			@resource[:ebs_optimized]
 		else
-			(@property_hash[:root_device_type] == 'ebs') ? @property_hash[:root_device_type].to_sym : :false
+			(@property_hash[:root_device_type] == 'ebs') ? @property_hash[:ebs_optimized].to_sym : :false
 		end
 	end
 
