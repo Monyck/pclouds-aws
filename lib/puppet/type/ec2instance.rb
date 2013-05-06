@@ -65,10 +65,6 @@ Puppet::Type.newtype(:ec2instance) do
 		defaultto 600
 	end
 
-	newparam(:user_data) do
-		desc "The user data which you want to pass the instance when it boots in string format."
-	end
-
 	newparam(:disable_api_termination) do
 		desc "Whether you can terminate the instance using the EC2 API. A value of true means you can't terminate the instance using the API (i.e., the instance is 'locked'); a value of false means you can."
 		newvalues(:true, :false)
@@ -118,6 +114,10 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newproperty(:key_name) do
 		desc "The name of the key pair to use."
+	end
+
+	newproperty(:user_data) do
+		desc "The user data which you want to pass the instance when it boots in string format."
 	end
 
 	newproperty(:security_group_names, :array_matching => :all) do

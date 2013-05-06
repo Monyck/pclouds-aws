@@ -2,6 +2,7 @@ require 'rubygems'
 require 'fog'
 require 'facter'
 require 'pp'
+require 'base64'
 require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
 
 Puppet::Type.type(:ec2instance).provide(:fog) do
@@ -31,6 +32,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					secprops[:security_group_names] = x['groupSet']
 					secprops[:security_group_ids] = x['groupIds']
 					x['instancesSet'].each do |y|
+						pp y
 						myname = y['tagSet']['Name'] ? y['tagSet']['Name'] : y['instanceId']
 						debug "Found ec2instance instance : #{myname}"
 						instprops = { :name => myname,
@@ -58,6 +60,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
 						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
+						#instprops[:user_data] = y['UserData'].to_s if y['UserData']
 						if (instprops[:root_device_type] == 'ebs')
 							instprops[:ebs_optimized] = y['ebsOptimized'].to_s
 						end
@@ -99,9 +102,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			return :terminated
 		elsif (@resource[:ensure] == :absent && @property_hash == {})
 			return :absent
-		elsif (@resource[:ensure] == :absent && @property_hash[:ensure] =~ /^(stopped|terminated)/)
+		elsif (@resource[:ensure] == :absent && @property_hash[:ensure] =~ /^terminated/)
 			return @resource[:ensure]
-		elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^(running)/)
+		elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^running/)
 			return @resource[:ensure]
 		else
 			(@property_hash[:ensure]) ? @property_hash[:ensure] : :absent
@@ -118,7 +121,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		when 'terminated', 'absent'
 			if (exists?)
 				case @property_hash[:ensure]
-				when 'pending', 'running'
+				when 'pending','running','stopping','stopped'
 					destroy
 				when 'shutting-down'
 					info "Instance #{@property_hash[:name]} is already shutting-down."
@@ -131,11 +134,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				case @property_hash[:ensure]
 				when 'shutting-down'
 					debug "#{@property_hash[:name]} is shutting_down"
-					notice "We should do something about whether it is stopping or terminating"
 				when 'terminated'
 					debug "Found a terminated instance #{property_hash[:instance_id]} with name #{@property_hash[:name]} : removing and starting a new one"
 					destroy
 					create
+				when 'stopped','stopping'
+					start
 				when 'pending'
 					info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
 				else
@@ -145,8 +149,23 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				debug "No instance #{@resource[:name]} exists, create a new one.."
 				create
 			end
+		when 'stopped'
+			if (exists?)
+				case @property_hash[:ensure]
+				when 'terminated'
+					fail "Sorry, I can't stop a terminated instance"	
+				when 'shutting-down'
+					info "Instance #{@resource[:name]} is already shutting-down, try stopping it once running."
+				when 'stopping'
+					info "Instance #{@resource[:name]} is already stopping."
+				when 'running','pending'
+					stop
+				end
+			else
+				fail("Sorry, can't stop non-existent ec2instance #{@resource[:name]}")
+			end
 		else
-			fail "I couldn't match ensure value #{value}"
+			fail "I'm lost as to how I ensure ec2instance is '#{value}'"
 		end
 	end
 			
@@ -215,7 +234,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			options_hash['EbsOptimized'] = @resource[:ebs_optimized] if @resource[:ebs_optimized]
 		end
 
-		# start the instance
+		# create the instance
 		notice "Creating new ec2instance '#{@resource[:name]}' from image #{@resource[:image_id]}"
 		info "#{@resource[:image_id]}: #{aminame}"
 		debug "compute.run_instances(#{@resource[:image_id]},1,1,options_hash)"
@@ -248,7 +267,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	def destroy
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-		if (@property_hash[:ensure] =~ /^(running|pending)$/)
+		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
 			notice "Terminating ec2 instance #{@resource[:name]} : #{@property_hash[:instance_id]}"
 			debug "compute.terminate_instances(#{@property_hash[:instance_id]})"
 			response = compute.terminate_instances(@property_hash[:instance_id])
@@ -270,6 +289,36 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
+	def stop
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		if (@property_hash[:ensure] =~ /^(running|pending)$/)
+			if (@property_hash[:root_device_type] == 'ebs')
+				debug "compute.stop_instances([#{@property_hash[:instance_id]}])"
+         	response = compute.stop_instances([@property_hash[:instance_id]])
+         	if (response.status != 200)
+            	raise "I couldn't stop ec2 instance #{@property_hash[:instance_id]}"
+         	elsif (@resource[:wait] == :true)
+              	wait_state(@resource[:name],'stopped',@resource[:max_wait].to_i)
+				end
+			else
+				raise "Sorry. I'm not able to stop an instance-store instance"
+			end
+		end
+	end
+
+	def start
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		if (@property_hash[:ensure] =~ /^(stopping|stopped)$/)
+			debug "compute.start_instances([#{@property_hash[:instance_id]}])"
+         response = compute.start_instances([@property_hash[:instance_id]])
+         if (response.status != 200)
+           	raise "I couldn't start ec2 instance #{@property_hash[:instance_id]}"
+         elsif (@resource[:wait] == :true)
+           	wait_state(@resource[:name],'running',@resource[:max_wait].to_i)
+			end
+		end
+	end
+
 	#---------------------------------------------------------------------------------------------------
 	# Properties 
 
@@ -287,14 +336,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	def region=(value)
 		fail "Sorry you can't change the region of a running ec2instance"
-	end
-
-	def instance_type
-		(@property_hash == {}) ? @resource[:instance_type] : @property_hash[:instance_type] 
-	end
-
-	def instance_type=(value)
-		fail "Sorry you can't change the instance_type of a running ec2instance"
 	end
 
 	def instance_id
@@ -460,12 +501,38 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		debug "TODO: Modify the assigned security groups.."
    end
 
+   def instance_type
+      (@property_hash == {}) ? @resource[:instance_type] : @property_hash[:instance_type]
+   end
+
+	def instance_type=(value)
+		if (@property_hash[:ensure] != 'stopped')
+			fail "Sorry, you can only change the instance_type of a 'stopped' ebs instance."
+		else
+			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'InstanceType.Value => #{value} })"
+         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'InstanceType.Value' => value })
+         if (response.status != 200)
+            raise "I couldn't modify the instance_type of ec2 instance #{@property_hash[:instance_id]}"
+         end
+		end
+   end
+
 	def kernel_id
 		(@property_hash == {}) ? @resource[:kernel_id] : @property_hash[:kernel_id] 
    end
 
 	def kernel_id=(value)
-		debug "TODO: Modify the kernel id"
+		if (@property_hash[:ensure] != 'stopped')
+			fail "Sorry, you can only change the kernel_id of a 'stopped' ebs instance."
+		else
+			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'Kernel.Value' => \"#{value}\" })"
+         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'Kernel.Value' => "#{value}" })
+         if (response.status != 200)
+            raise "I couldn't modify the kernel_id of ec2 instance #{@property_hash[:instance_id]}"
+         end
+		end
    end
 
 	def ramdisk_id
@@ -473,8 +540,35 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
    end
 
 	def ramdisk_id=(value)
-		debug "TODO: Modify the ramdisk id"
+		if (@property_hash[:ensure] != 'stopped')
+			fail "Sorry, you can only change the ramdisk_id of a 'stopped' ebs instance."
+		else
+			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'Ramdisk.Value' => \"#{value}\" })"
+         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'Ramdisk.Value' => "#{value}" })
+         if (response.status != 200)
+            raise "I couldn't modify the ramdisk_id of ec2 instance #{@property_hash[:instance_id]}"
+         end
+		end
    end
+
+	def user_data
+		(@property_hash == {}) ? @resource[:user_data] : @property_hash[:user_data] 
+   end
+
+	#def user_data=(value)
+	#	if (@property_hash[:ensure] != 'stopped')
+	#		fail "Sorry, you can only change the user_data of a 'stopped' ebs instance."
+	#	else
+	#		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+   #      debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'UserData.Value' => \"#{value}\" })"
+	#		encoded=Base64.encode64(value)
+   #      response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'UserData.Value' => "#{encoded}" })
+   #      if (response.status != 200)
+   #         raise "I couldn't modify the user_data of ec2 instance #{@property_hash[:instance_id]}"
+   #      end
+	#	end
+   #end
 
 	def monitoring_enabled
 		(@property_hash == {}) ? @resource[:monitoring_enabled] : @property_hash[:monitoring_enabled] 
