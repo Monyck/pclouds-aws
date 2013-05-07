@@ -1,19 +1,52 @@
 require 'fog'
+require 'yaml'
 
 # This helper class manages and shares connections to AWS so that
 # provider functions don't all have to open their own connections
 
 module PuppetX
 	module Practicalclouds
-		class Awsaccess
+
+	   # yamlhash - extends hash to load and save values from a selected yaml file
+		# (e.g. /etc/puppet/aws.yaml)
+
+		class Yamlhash < Hash
 			@@yamlfile="#{Puppet[:confdir]}/aws.yaml"
+			
+			def self.load(type)
+				if File.exists?(@@yamlfile)
+					hash = {}
+            	yamlf = YAML::load(File.open(@@yamlfile))
+					if (yamlf[type])
+						hash = yamlf[type].clone
+					end
+         	end
+				hash
+			end
+				
+			def self.save(type,hash)
+				outhash = {}
+				if File.exists?(@@yamlfile)
+            	outhash = YAML::load(File.open(@@yamlfile))
+				end
+				outhash[type] = hash
+				File.open(@@yamlfile,'w+') {|f| f.write(outhash.to_yaml) }
+			end
+		end
+					
+		# Implementation of a simple awsaccess using our yaml hash storage
+		# Credentials and Connections are stored within the class so that
+		# they are reused.
+
+		class Awsaccess
 			@@credentials = {}
 			@@connections = {}
 
 			# return a list of regions from an aws credential 
 			def self.regions(name)
 				if (@@credentials == {})
-					@@credentials = YAML::load(File.open(@@yamlfile))
+					@@credentials = PuppetX::Practicalclouds::Yamlhash.new
+					@@credentials.load('awsaccess')
 				end
 				if (@@credentials[name])
 					return (@@credentials[name][:regions]) ? @@credentials[name][:regions] : []
@@ -33,7 +66,7 @@ module PuppetX
 
 				# make sure we have the credentials loaded and make a new connection
 				if (@@credentials == {})
-					@@credentials = YAML::load(File.open(@@yamlfile))
+					@@credentials = PuppetX::Practicalclouds::Yamlhash.new('awsaccess')
 				end
 				if (@@credentials[name])
 					if (@@credentials[name][:regions] && !@@credentials[name][:regions].member?(reg))

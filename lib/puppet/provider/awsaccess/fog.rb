@@ -2,6 +2,7 @@ require 'rubygems'
 require 'fog'
 require 'facter'
 require 'pp'
+require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
 
 $debug=true
 
@@ -12,11 +13,9 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	commands :fog => 'fog'
 
 	def self.instances
-		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
-
-		return [] if (!File.exists?(@yamlfile))
 		resp=[]
-		chash = YAML::load(File.open(@yamlfile))
+		chash = PuppetX::Practicalclouds::Yamlhash.load('awsaccess')
+		return [] if (chash == {})
 		chash.keys.each {|n|
 			settings = chash[n]
 			settings[:name] = n
@@ -65,22 +64,18 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 
 	def flush
 		if (@updated_properties == true)
-			configshash = {}
-			if (File.exists?(@yamlfile))
-				configshash = YAML.load(File.read(@yamlfile))
-			end
+			configshash = PuppetX::Practicalclouds::Yamlhash.load('awsaccess')
 			if (@property_hash[:ensure] == :present)
 				configshash[@property_hash[:name]] = @property_hash
 				configshash[@property_hash[:name]].delete(:name)
 			else
 				configshash.delete(@property_hash[:name])
 			end
-			File.open(@yamlfile,'w+') {|f| f.write(configshash.to_yaml) }
+			PuppetX::Practicalclouds::Yamlhash.save('awsaccess',configshash)
 		end
 	end
 
 	def exists?
-		@yamlfile = "#{Puppet[:confdir]}/aws.yaml"
 		@property_hash[:ensure] == :present
 	end
 end
