@@ -60,7 +60,13 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
 						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
-						#instprops[:user_data] = y['UserData'].to_s if y['UserData']
+
+						# lookup user_data from our yaml file
+						udata = lookup_user_data(myname)
+						if (udata) 
+							instprops[:user_data] = udata
+						end
+
 						if (instprops[:root_device_type] == 'ebs')
 							instprops[:ebs_optimized] = y['ebsOptimized'].to_s
 						end
@@ -191,7 +197,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		name
 	end
 
-	def create
+	def create(wait=:false)
+		wait=:true if (@resource[:wait] == :true)
 		options_hash={}
 
 		# check required parameters...
@@ -255,8 +262,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource[:tags])
 
+			# save the user_data on the puppet master because we can't
+			# access it through the amazon api
+			save_user_data(@resource[:name], @resource[:user_data]) if @resource[:user_data]
+
 			# optionally wait for the instance to be "running"
-			if (@resource[:wait] == :true)
+			if (wait == :true)
 				wait_state(instid,'running',@resource[:max_wait])
 			end
 		else
@@ -265,7 +276,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def destroy
+	def destroy(wait=:false)
+		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
 			notice "Terminating ec2 instance #{@resource[:name]} : #{@property_hash[:instance_id]}"
@@ -274,13 +286,17 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (response.status != 200)
 				raise "I couldn't terminate ec2 instance #{@property_hash[:instance_id]}"
 			else
-				if (@resource[:wait] == :true)
+				if (wait == :true)
 					wait_state(@resource[:name],'terminated',@resource[:max_wait].to_i)
 				end
 			end
 		else
 			notice "Instance #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
 		end
+
+		# remove any associated user data from the aws yaml file
+		remove_user_data(@resource[:name])
+
 		notice "Removing Name tag #{@resource[:name]} from #{@property_hash[:instance_id]}"
 		debug "compute.delete_tags(#{@property_hash[:instance_id]},{ 'Name' => #{@resource[:name]}})"
 		response = compute.delete_tags(@property_hash[:instance_id],{ 'Name' => @resource[:name]}) 
@@ -289,7 +305,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def stop
+	def stop(wait=:false)
+		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending)$/)
 			if (@property_hash[:root_device_type] == 'ebs')
@@ -297,7 +314,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
          	response = compute.stop_instances([@property_hash[:instance_id]])
          	if (response.status != 200)
             	raise "I couldn't stop ec2 instance #{@property_hash[:instance_id]}"
-         	elsif (@resource[:wait] == :true)
+         	elsif (wait == :true)
               	wait_state(@resource[:name],'stopped',@resource[:max_wait].to_i)
 				end
 			else
@@ -306,14 +323,15 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def start
+	def start(wait=:false)
+		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(stopping|stopped)$/)
 			debug "compute.start_instances([#{@property_hash[:instance_id]}])"
          response = compute.start_instances([@property_hash[:instance_id]])
          if (response.status != 200)
            	raise "I couldn't start ec2 instance #{@property_hash[:instance_id]}"
-         elsif (@resource[:wait] == :true)
+         elsif (wait == :true)
            	wait_state(@resource[:name],'running',@resource[:max_wait].to_i)
 			end
 		end
@@ -556,19 +574,34 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		(@property_hash == {}) ? @resource[:user_data] : @property_hash[:user_data] 
    end
 
-	#def user_data=(value)
-	#	if (@property_hash[:ensure] != 'stopped')
-	#		fail "Sorry, you can only change the user_data of a 'stopped' ebs instance."
-	#	else
-	#		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-   #      debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'UserData.Value' => \"#{value}\" })"
-	#		encoded=Base64.encode64(value)
-   #      response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'UserData.Value' => "#{encoded}" })
-   #      if (response.status != 200)
-   #         raise "I couldn't modify the user_data of ec2 instance #{@property_hash[:instance_id]}"
-   #      end
-	#	end
-   #end
+	# updating the user_data can only be done by destroying and recreating an instance-store style instance
+	# or by stopping and starting an ebs style instance.
+	def user_data=(value)
+		case @property_hash[:root_device_type]
+		when 'instance-store'
+			case @property_hash[:ensure]
+			when 'terminated','shutting-down','absent'
+				fail "Sorry, I can't change the user_data of an instance store instance which is #{@property_hash[:ensure]}"
+			when 'running'
+				notice "#{resource[:name]} is an instance-store instance: terminating and re-creating with new user_data"
+				destroy(:true)
+				create
+			end
+		when 'ebs'
+			case @property_hash[:ensure]
+			when 'terminated','shutting-down','absent'
+				fail "Sorry, I can't change the user_data of an ebs instance which is #{@property_hash[:ensure]}"
+			when 'stopped'
+         	debug "Changing the user_data on a stopped ebs instance"
+				modify_user_data(value)
+			when 'running','pending'
+				notice "#{resource[:name]} is an ebs instance: stopping and starting with new user_data"
+				stop(:true)
+				modify_user_data(value)
+				start				
+			end
+		end
+   end
 
 	def monitoring_enabled
 		(@property_hash == {}) ? @resource[:monitoring_enabled] : @property_hash[:monitoring_enabled] 
@@ -692,5 +725,39 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		end
 	end
+
+	# Functions for storing and retreiving user_data from the 
+	# aws yaml file.
+
+	def self.lookup_user_data(name)
+		udata = PuppetX::Practicalclouds::Storable::load('user_data')
+      udata[name]
+	end
+
+	def save_user_data(name,data)
+		udata = PuppetX::Practicalclouds::Storable::load('user_data')
+		udata[name] = data
+		PuppetX::Practicalclouds::Storable::store('user_data',udata)
+	end
+		
+	def remove_user_data(name)
+		udata = PuppetX::Practicalclouds::Storable::load('user_data')
+		if (udata[name])
+			udata.delete(name)
+			PuppetX::Practicalclouds::Storable::store('user_data',udata)
+		end
+	end
+
+	def modify_user_data(value)
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'UserData.Value' => \"#{value}\" })"
+		encoded=Base64.encode64(value)
+		response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'UserData.Value' => "#{encoded}" })
+		if (response.status != 200)
+			raise "I couldn't modify the user_data of ec2 instance #{@property_hash[:instance_id]}"
+		end
+		save_user_data(@property_hash[:name],value)
+	end
+
 
 end
