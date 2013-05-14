@@ -1,37 +1,34 @@
 require 'yaml'
+require 'pp'
 
 # This helper class manages and shares connections to AWS so that
 # provider functions don't all have to open their own connections
 
 module PuppetX
 	module Practicalclouds
+		module Storable
 
-	   # yamlhash - extends hash to load and save values from a selected yaml file
-		# (e.g. /etc/puppet/aws.yaml)
+			YAMLFILE="#{Puppet[:confdir]}/aws.yaml"
 
-		module storable
-			@yamlfile="#{Puppet[:confdir]}/aws.yaml"
-			
-			def load(type)
-				if File.exists?(@yamlfile)
+			def self.load(type)
+				if File.exists?(YAMLFILE)
 					hash = {}
-            	yamlf = YAML::load(File.open(@yamlfile))
+					yamlf = YAML::load(File.open(YAMLFILE))
 					if (yamlf[type])
 						hash = yamlf[type].clone
 					end
-         	end
+				end
 				hash
 			end
-				
-			def store(type)
+
+			def self.store(type,hash)
 				outhash = {}
-				if File.exists?(@yamlfile)
-            	outhash = YAML::load(File.open(@yamlfile))
+				if File.exists?(YAMLFILE)
+					outhash = YAML::load(File.open(YAMLFILE))
 				end
-				outhash[type] = self
-				File.open(@yamlfile,'w+') {|f| f.write(outhash.to_yaml) }
+				outhash[type] = hash
+				File.open(YAMLFILE,'w+') {|f| f.write(outhash.to_yaml) }
 			end
 		end
-				
 	end
 end	
