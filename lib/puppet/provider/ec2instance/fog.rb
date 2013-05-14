@@ -4,6 +4,7 @@ require 'facter'
 require 'pp'
 require 'base64'
 require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
+require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','storable.rb'))
 
 Puppet::Type.type(:ec2instance).provide(:fog) do
 	desc "The AWS Provider which implements the ec2instance type."
@@ -32,7 +33,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					secprops[:security_group_names] = x['groupSet']
 					secprops[:security_group_ids] = x['groupIds']
 					x['instancesSet'].each do |y|
-						pp y
 						myname = y['tagSet']['Name'] ? y['tagSet']['Name'] : y['instanceId']
 						debug "Found ec2instance instance : #{myname}"
 						instprops = { :name => myname,
