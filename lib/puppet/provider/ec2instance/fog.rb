@@ -197,8 +197,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		name
 	end
 
-	def create(wait=:false)
-		wait=:true if (@resource[:wait] == :true)
+	def create
 		options_hash={}
 
 		# check required parameters...
@@ -267,16 +266,14 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			save_user_data(@resource[:name], @resource[:user_data]) if @resource[:user_data]
 
 			# optionally wait for the instance to be "running"
-			if (wait == :true)
-				wait_state(instid,'running',@resource[:max_wait])
-			end
+			optional_wait('running')
 		else
 			debug "The compute.run_instances call failed!"
 			raise "I couldn't create the ec2 instance, sorry! API Error!"
 		end
 	end
 
-	def destroy(wait=:false)
+	def destroy
 		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
@@ -286,9 +283,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (response.status != 200)
 				raise "I couldn't terminate ec2 instance #{@property_hash[:instance_id]}"
 			else
-				if (wait == :true)
-					wait_state(@resource[:name],'terminated',@resource[:max_wait].to_i)
-				end
+				optional_wait('terminated')
 			end
 		else
 			notice "Instance #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
@@ -305,7 +300,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def stop(wait=:false)
+	def stop
 		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending)$/)
@@ -314,16 +309,15 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
          	response = compute.stop_instances([@property_hash[:instance_id]])
          	if (response.status != 200)
             	raise "I couldn't stop ec2 instance #{@property_hash[:instance_id]}"
-         	elsif (wait == :true)
-              	wait_state(@resource[:name],'stopped',@resource[:max_wait].to_i)
 				end
+           	optional_wait('stopped')
 			else
 				raise "Sorry. I'm not able to stop an instance-store instance"
 			end
 		end
 	end
 
-	def start(wait=:false)
+	def start
 		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(stopping|stopped)$/)
@@ -331,9 +325,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
          response = compute.start_instances([@property_hash[:instance_id]])
          if (response.status != 200)
            	raise "I couldn't start ec2 instance #{@property_hash[:instance_id]}"
-         elsif (wait == :true)
-           	wait_state(@resource[:name],'running',@resource[:max_wait].to_i)
 			end
+         optional_wait('running')
 		end
 	end
 
@@ -666,6 +659,14 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		else
 			raise "Sorry, I couldn't find instance #{name}"
+		end
+	end
+
+	def optional_wait(desired_state)
+		wait=(@resource[:wait] == :true) ? :true : :false
+		max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+		if (wait == :true)
+			wait_state(@resource[:name],desired_state,max)
 		end
 	end
 
