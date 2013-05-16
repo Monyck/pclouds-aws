@@ -274,7 +274,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def destroy
-		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
 			notice "Terminating ec2 instance #{@resource[:name]} : #{@property_hash[:instance_id]}"
@@ -301,7 +300,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def stop
-		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending)$/)
 			if (@property_hash[:root_device_type] == 'ebs')
@@ -318,7 +316,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def start
-		wait=:true if (@resource[:wait] == :true)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(stopping|stopped)$/)
 			debug "compute.start_instances([#{@property_hash[:instance_id]}])"
@@ -329,6 +326,50 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
          optional_wait('running')
 		end
 	end
+
+	def modify_attributes(attributes)
+		att_to_api = { :instance_type => 'InstanceType.Value', :kernel_id => 'Kernel.Value', :ramdisk_id => 'Ramdisk.Value', :user_data => 'UserData.Value', :disable_api_temination => 'DisableApiTermination.Value', :instance_initiated_shutdown_behavior => 'InstanceInitiatedShutdownBehavior.Value', :block_device_mapping => 'BlockDeviceMapping.Value', :source_dest_check => 'SourceDestCheck.Value', :security_group_ids => 'GroupId', :ebs_optimized => 'EbsOptimized.Value' }
+   	compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		attributes.each {|k,v|
+     		debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ #{att_to_api[k]} => #{v} })"
+     		response = compute.modify_instance_attribute(@property_hash[:instance_id], { att_to_api[k] => v })
+     		if (response.status != 200)
+       		raise "Sorry, I couldn't modify the #{k} of ec2 instance #{@property_hash[:instance_id]}"
+        	end
+		}
+	end
+
+	# for ebs based instances where we can update certain properties
+	# apply if stopped or stop the instance and restart it if running...
+   def flush
+		if @updated_property_hash
+			made_whilst_stopped = [ :instance_type, :kernel_id, :ramdisk_id, :user_data, :disable_api_temination, :instance_initiated_shutdown_behavior, :block_device_mapping, :source_dest_check, :security_group_ids, :ebs_optimized ]
+			if (@property_hash[:root_device_type] == 'ebs' && (@updated_property_hash.keys - made_whilst_stopped).empty?)
+				if (@property_hash[:ensure] =~ /^(running|pending)$/)
+					notice "Ebs instance #{@resource[:name]} is being stopped in order to make requested changes"
+					stop
+					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+					wait_state(@property_hash[:name],'stopped',max)
+					modify_attributes() 
+					start
+				elsif (@property_hash[:ensure] == 'stopped')
+
+
+
+
+
+
+
+				end
+			else
+				notice "Instance #{@resource[:name]} is being terminated and re-created in order to make requested changes"
+				destroy
+				create
+			end
+		else
+			debug "#{@resource[:name]} does not have any modified attributes"
+      end
+   end
 
 	#---------------------------------------------------------------------------------------------------
 	# Properties 
