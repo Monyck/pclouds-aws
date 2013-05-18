@@ -122,11 +122,11 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			return :absent
 		elsif (@resource[:ensure] == :absent && @property_hash[:ensure] =~ /^terminated/)
 			return @resource[:ensure]
-			elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^running/)
-				return @resource[:ensure]
-				else
-					(@property_hash[:ensure]) ? @property_hash[:ensure] : :absent
-					end
+		elsif (@resource[:ensure] == :present && @property_hash[:ensure] =~ /^running/)
+			return @resource[:ensure]
+		else
+			(@property_hash[:ensure]) ? @property_hash[:ensure] : :absent
+		end
 	end
 
 	# ensurable replacement: decide what to do when requested to change between our states.
@@ -145,7 +145,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					info "Instance #{@property_hash[:name]} is already shutting-down."
 				else
 					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-					end
+				end
 			end
 		when 'running','present'
 			if (exists?)
@@ -162,7 +162,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
 				else
 					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-					end
+				end
 			else
 				debug "No instance #{@resource[:name]} exists, create a new one.."
 				create
@@ -397,7 +397,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		else
 			notice "Instance #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
-			end
+		end
 
 		# remove any associated user data from the aws yaml file
 		remove_user_data(@property_hash[:name])
