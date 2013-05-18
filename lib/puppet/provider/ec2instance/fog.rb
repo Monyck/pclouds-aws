@@ -16,6 +16,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# being requested if the resource does not exist. 
 	#mk_resource_methods
 
+	#---------------------------------------------------------------------------------------------------
+	# Puppet resource support and prefetch
+
 	def self.instances
 		regions = PuppetX::Practicalclouds::Awsaccess.regions('default')
 		regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','ap-southeast-1','ap-southeast-2','ap-northeast-1','sa-east-1'] if (regions==[])
@@ -73,6 +76,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					
 						instprops.merge!(secprops)
 	
+						# list all instances with Names or are not terminted.
 						if (instprops[:ensure] != 'terminated' || (instprops['tagSet'] && instprops['tagSet']['Name']))
 							allinstances << instprops
 						end
@@ -99,6 +103,14 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			end
 		end
 	end
+
+	def self.lookup_user_data(name)
+		udata = PuppetX::Practicalclouds::Storable::load('user_data')
+      udata[name]
+	end
+
+	#---------------------------------------------------------------------------------------------------
+	# Ensure - handle all the running states...
 
 	# ensureable replacement: Getter for custom 'ensure' property
 	# manipulate the values which mean the same thing and when someone
@@ -174,7 +186,106 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			fail "I'm lost as to how I ensure ec2instance is '#{value}'"
 		end
 	end
-			
+
+	#---------------------------------------------------------------------------------------------------
+	# Property Accessors 
+
+	# getters... 
+
+	# We want to return the value of the prefected property_hash but if it does not exist then
+	# we want to return the value of the resource so that each property does not try to update itself.
+	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
+      define_method property do
+         (@property_hash == {}) ? @resource[property.to_sym] : @property_hash[property.to_sym]
+      end
+	end
+
+	# setters...
+
+	# Define methods for strictly read-only properties...
+	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces).each do |property|
+		define_method "#{property}=" do
+			fail "Sorry, you are not allowed to change the property #{property} - do not use it in your manifests."
+		end
+	end
+
+	# Define properties which can be only be changed by terminating and recreating the instance
+	%w(availability_zone region image_id subnet_id key_name ).each do |property|
+		define_method "#{property}=" do |value|
+			if (@change_when_terminated)
+				@change_when_terminated[property.to_sym] = value
+			else
+				@change_when_terminated={property.to_sym => value}
+			end
+		end
+	end
+
+	# Define properties which can be changed by stopping an ebs instance and using modify_instance_attributes
+	%w(instance_type kernel_id ramdisk_id disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized).each do |property|
+		define_method "#{property}=" do |value|
+			if (@change_when_stopped)
+				@change_when_stopped[property.to_sym] = value
+			else
+				@change_when_stopped={property.to_sym => value}
+			end
+		end
+		define_method "flush_#{property}=" do |value|
+			modify_attribute(property,value)
+		end
+	end
+
+	# Properties which require unqiue handling 
+	%w(monitoring_enabled tags).each do |property|
+		define_method "#{property}=" do |value|
+			if (@change_whenever)
+				@change_whenever[property.to_sym] = value
+			else
+				@change_whenever={property.to_sym => value}
+			end
+		end
+	end
+
+	# User data needs it own special setters..
+
+	def user_data=(value)
+		if (@change_when_stopped)
+			@change_when_stopped[property.to_sym] = value
+		else
+			@change_when_stopped={property.to_sym => value}
+		end
+	end
+
+	def flush_user_data=(value)
+      enc=Base64.encode64(value)
+		modify_attribute('user_data',enc)
+      save_user_data(@property_hash[:name],value)
+	end
+	
+	# Property setters which get called by flush
+
+	def flush_monitoring_enabled=(value)
+		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)	
+		if (@resource[:monitoring_enabled] = :true)
+			notice "Enabling monitoring on instance #{@resource[:name]}/#{@property_hash[:instance_id]}"
+			response = compute.monitor_instances([ @property_hash[:instance_id] ])
+			raise "Sorry, I couldn't enable monitoring!" if (response.status != 200)
+		else
+			notice "Disabling monitoring on instance #{@resource[:name]}/#{@property_hash[:instance_id]}"
+			response = compute.unmonitor_instances([ @property_hash[:instance_id] ])
+			raise "Sorry, I couldn't disable monitoring!" if (response.status != 200)
+		end
+   end
+
+	def flush_tags=(value)
+		debug "#{@resource[:name]} needs its tags updating..."
+		debug "Requested tags (YAML):-\n#{@resource[:tags].to_yaml}"
+		debug "Actual tags (YAML):-\n#{@property_hash[:tags].to_yaml}"
+		assign_tags(@property_hash[:instance_id],value)
+	end
+
+	#---------------------------------------------------------------------------------------------------
+	# Helper Methods
+
    def exists?
 		debug "Checking if #{@resource[:name]} exists"
 		return nil if (!@property_hash)
@@ -182,12 +293,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
    end
 
 	def myregion
-      if (@resource[:availability_zone])
+		if (@property_hash[:region])
+			return @property_hash[:region]
+      elsif (@resource[:availability_zone])
          return @resource[:availability_zone].gsub(/.$/,'')
       elsif (@resource[:region])
          return @resource[:region]
-		elsif (@property_hash[:region])
-			return @property_hash[:region]
       end
 		raise "Sorry, I could not work out my region"
 	end
@@ -276,7 +387,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def destroy
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
-			notice "Terminating ec2 instance #{@resource[:name]} : #{@property_hash[:instance_id]}"
+			notice "Terminating ec2 instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
 			debug "compute.terminate_instances(#{@property_hash[:instance_id]})"
 			response = compute.terminate_instances(@property_hash[:instance_id])
 			if (response.status != 200)
@@ -289,14 +400,16 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 
 		# remove any associated user data from the aws yaml file
-		remove_user_data(@resource[:name])
+		remove_user_data(@property_hash[:name])
 
-		notice "Removing Name tag #{@resource[:name]} from #{@property_hash[:instance_id]}"
-		debug "compute.delete_tags(#{@property_hash[:instance_id]},{ 'Name' => #{@resource[:name]}})"
-		response = compute.delete_tags(@property_hash[:instance_id],{ 'Name' => @resource[:name]}) 
+		notice "Removing Name tag #{@property_hash[:name]} from #{@property_hash[:instance_id]}"
+		debug "compute.delete_tags(#{@property_hash[:instance_id]},{ 'Name' => #{@property_hash[:name]}})"
+		response = compute.delete_tags(@property_hash[:instance_id],{ 'Name' => @property_hash[:name]}) 
 		if (response.status != 200)
 			raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
 		end
+		# delete the property_hash - this instance no longer exists.
+		@property_hash = {}
 	end
 
 	def stop
@@ -327,337 +440,44 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def modify_attributes(attributes)
-		att_to_api = { :instance_type => 'InstanceType.Value', :kernel_id => 'Kernel.Value', :ramdisk_id => 'Ramdisk.Value', :user_data => 'UserData.Value', :disable_api_temination => 'DisableApiTermination.Value', :instance_initiated_shutdown_behavior => 'InstanceInitiatedShutdownBehavior.Value', :block_device_mapping => 'BlockDeviceMapping.Value', :source_dest_check => 'SourceDestCheck.Value', :security_group_ids => 'GroupId', :ebs_optimized => 'EbsOptimized.Value' }
+	def modify_attribute(property,value)
+		prop_to_api = { :instance_type => 'InstanceType.Value', :kernel_id => 'Kernel.Value', :ramdisk_id => 'Ramdisk.Value', :user_data => 'UserData.Value', :disable_api_temination => 'DisableApiTermination.Value', :instance_initiated_shutdown_behavior => 'InstanceInitiatedShutdownBehavior.Value', :block_device_mapping => 'BlockDeviceMapping.Value', :source_dest_check => 'SourceDestCheck.Value', :security_group_ids => 'GroupId', :ebs_optimized => 'EbsOptimized.Value' }
    	compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-		attributes.each {|k,v|
-     		debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ #{att_to_api[k]} => #{v} })"
-     		response = compute.modify_instance_attribute(@property_hash[:instance_id], { att_to_api[k] => v })
-     		if (response.status != 200)
-       		raise "Sorry, I couldn't modify the #{k} of ec2 instance #{@property_hash[:instance_id]}"
-        	end
-		}
+    	debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ #{prop_to_api[property.to_sym]} => #{value} })"
+     	response = compute.modify_instance_attribute(@property_hash[:instance_id], { prop_to_api[property.to_sym] => value })
+     	raise "Sorry, I couldn't modify the #{k} of ec2 instance #{@property_hash[:instance_id]}" if (response.status != 200)
 	end
 
-	# for ebs based instances where we can update certain properties
-	# apply if stopped or stop the instance and restart it if running...
+	# Flush - write out the changes which require a restart or applying whilst stopped.
    def flush
-		if @updated_property_hash
-			made_whilst_stopped = [ :instance_type, :kernel_id, :ramdisk_id, :user_data, :disable_api_temination, :instance_initiated_shutdown_behavior, :block_device_mapping, :source_dest_check, :security_group_ids, :ebs_optimized ]
-			if (@property_hash[:root_device_type] == 'ebs' && (@updated_property_hash.keys - made_whilst_stopped).empty?)
-				if (@property_hash[:ensure] =~ /^(running|pending)$/)
-					notice "Ebs instance #{@resource[:name]} is being stopped in order to make requested changes"
-					stop
-					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
-					wait_state(@property_hash[:name],'stopped',max)
-					modify_attributes() 
-					start
-				elsif (@property_hash[:ensure] == 'stopped')
-
-
-
-
-
-
-
-				end
-			else
-				notice "Instance #{@resource[:name]} is being terminated and re-created in order to make requested changes"
-				destroy
-				create
-			end
-		else
-			debug "#{@resource[:name]} does not have any modified attributes"
-      end
-   end
-
-	#---------------------------------------------------------------------------------------------------
-	# Properties 
-
-	def availability_zone
-		(@property_hash == {}) ? @resource[:availability_zone] : @property_hash[:availability_zone] 
-	end
-
-	def availability_zone=(value)
-		fail "Sorry you can't change the availability_zone of a running ec2instance"
-	end
-
-	def region
-		(@property_hash == {}) ? @resource[:region] : @property_hash[:region] 
-	end
-
-	def region=(value)
-		fail "Sorry you can't change the region of a running ec2instance"
-	end
-
-	def instance_id
-		(@property_hash == {}) ? @resource[:instance_id] : @property_hash[:instance_id] 
-	end
-
-	def instance_id=(value)
-		fail "Sorry you can't change the instance_id of a running ec2instance"
-	end
-
-	def image_id
-		(@property_hash == {}) ? @resource[:image_id] : @property_hash[:image_id] 
-	end
-
-	def image_id=(value)
-		fail "Sorry you can't change the image_id of a running ec2instance"
-	end
-
-	def subnet_id
-		(@property_hash == {}) ? @resource[:subnet_id] : @property_hash[:subnet_id] 
-	end
-
-	def subnet_id=(value)
-		fail "Sorry you can't change the subnet_id of a running ec2instance"
-	end
-
-	def ebs_optimized
-		if (@property_hash == {})
-			@resource[:ebs_optimized]
-		else
-			(@property_hash[:root_device_type] == 'ebs') ? @property_hash[:ebs_optimized].to_sym : :false
+		# If we need to terminate the instance then all changes will be made by creating the new instance.
+		if (@change_when_terminated || (@change_when_stopped && @property_hash[:root_device_type] == 'instance_store'))
+			notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the following property changes:-\n#{@change_when_terminated.merge(@change_when_stopped).to_yaml}"
+			destroy
+			create
+			return
 		end
-	end
 
-	def ebs_optimized=(value)
-		fail "Sorry you can't change the ebs_optimized of a running ec2instance"
-	end
-
-	def key_name
-		(@property_hash == {}) ? @resource[:key_name] : @property_hash[:key_name] 
-	end
-
-	def key_name=(value)
-		fail "Sorry you can't change the key_name of a running ec2instance"
-	end
-
-	def virtualization_type
-		(@property_hash == {}) ? @resource[:virtualization_type] : @property_hash[:virtualization_type] 
-	end
-
-	def virtualization_type=(value)
-		fail "Sorry you can't change the virtualization_type of a running ec2instance"
-	end
-
-	def private_ip_address
-		(@property_hash == {}) ? @resource[:private_ip_address] : @property_hash[:private_ip_address] 
-	end
-
-	def private_ip_address=(value)
-		fail "Sorry you can't change the private_ip_address of a running ec2instance"
-	end
-
-	def ip_address
-		(@property_hash == {}) ? @resource[:ip_address] : @property_hash[:ip_address] 
-	end
-
-	def ip_address=(value)
-		fail "Sorry you can't change the ip_address of a running ec2instance"
-	end
-
-	def architecture
-		(@property_hash == {}) ? @resource[:architecture] : @property_hash[:architecture] 
-	end
-
-	def architecture=(value)
-		fail "Sorry you can't change the architecture of a running ec2instance"
-	end
-
-	def dns_name
-		(@property_hash == {}) ? @resource[:dns_name] : @property_hash[:dns_name] 
-	end
-
-	def dns_name=(value)
-		fail "Sorry you can't change the dns_name of a running ec2instance"
-	end
-
-	def private_dns_name
-		(@property_hash == {}) ? @resource[:private_dns_name] : @property_hash[:private_dns_name] 
-	end
-
-	def private_dns_name=(value)
-		fail "Sorry you can't change the private_dns_name of a running ec2instance"
-	end
-
-	def root_device_type
-		(@property_hash == {}) ? @resource[:root_device_type] : @property_hash[:root_device_type] 
-	end
-
-	def root_device_type=(value)
-		fail "Sorry you can't change the root_device_type of a running ec2instance"
-	end
-
-	def launch_time
-		(@property_hash == {}) ? @resource[:launch_time] : @property_hash[:launch_time] 
-	end
-
-	def launch_time=(value)
-		fail "Sorry you can't change the launch_time of a running ec2instance"
-	end
-
-	def owner_id
-		(@property_hash == {}) ? @resource[:owner_id] : @property_hash[:owner_id] 
-	end
-
-	def owner_id=(value)
-		fail "Sorry you can't change the owner_id of a running ec2instance"
-	end
-
-	def network_interfaces
-		(@property_hash == {}) ? @resource[:network_interfaces] : @property_hash[:network_interfaces] 
-	end
-
-	def network_interfaces=(value)
-		fail "Sorry you can't change the network_interfaces of a running ec2instance"
-	end
-
-	def block_device_mapping
-		(@property_hash == {}) ? @resource[:block_device_mapping] : @property_hash[:block_device_mapping] 
-	end
-
-	def block_device_mapping=(value)
-		fail "Sorry you can't change the block_device_mapping of a running ec2instance"
-	end
-
-	#---------------------------------------------------------------------------------------------------
-	# Properties which CAN be changed...
-
-	        # ==== Parameters
-        # * instance_id<~String> - Id of instance to modify
-        # * attributes<~Hash>:
-        #   'InstanceType.Value'<~String> - New instance type
-        #   'Kernel.Value'<~String> - New kernel value
-        #   'Ramdisk.Value'<~String> - New ramdisk value
-        #   'UserData.Value'<~String> - New userdata value
-        #   'DisableApiTermination.Value'<~Boolean> - Change api termination value
-        #   'InstanceInitiatedShutdownBehavior.Value'<~String> - New instance initiated shutdown behaviour, in ['stop', 'terminate']
-        #   'SourceDestCheck.Value'<~Boolean> - New sourcedestcheck value
-        #   'GroupId'<~Array> - One or more groups to add instance to (VPC only)
-
-	def security_group_names
-		(@property_hash == {}) ? @resource[:security_group_names] : @property_hash[:security_group_names] 
-   end
-
-	def security_group_names=(value)
-		debug "TODO: Modify the assigned security groups.."
-   end
-
-	def security_group_ids
-		(@property_hash == {}) ? @resource[:security_group_ids] : @property_hash[:security_group_ids] 
-   end
-
-	def security_group_ids=(value)
-		debug "TODO: Modify the assigned security groups.."
-   end
-
-   def instance_type
-      (@property_hash == {}) ? @resource[:instance_type] : @property_hash[:instance_type]
-   end
-
-	def instance_type=(value)
-		if (@property_hash[:ensure] != 'stopped')
-			fail "Sorry, you can only change the instance_type of a 'stopped' ebs instance."
-		else
-			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'InstanceType.Value => #{value} })"
-         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'InstanceType.Value' => value })
-         if (response.status != 200)
-            raise "I couldn't modify the instance_type of ec2 instance #{@property_hash[:instance_id]}"
-         end
-		end
-   end
-
-	def kernel_id
-		(@property_hash == {}) ? @resource[:kernel_id] : @property_hash[:kernel_id] 
-   end
-
-	def kernel_id=(value)
-		if (@property_hash[:ensure] != 'stopped')
-			fail "Sorry, you can only change the kernel_id of a 'stopped' ebs instance."
-		else
-			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'Kernel.Value' => \"#{value}\" })"
-         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'Kernel.Value' => "#{value}" })
-         if (response.status != 200)
-            raise "I couldn't modify the kernel_id of ec2 instance #{@property_hash[:instance_id]}"
-         end
-		end
-   end
-
-	def ramdisk_id
-		(@property_hash == {}) ? @resource[:ramdisk_id] : @property_hash[:ramdisk_id] 
-   end
-
-	def ramdisk_id=(value)
-		if (@property_hash[:ensure] != 'stopped')
-			fail "Sorry, you can only change the ramdisk_id of a 'stopped' ebs instance."
-		else
-			compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-         debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'Ramdisk.Value' => \"#{value}\" })"
-         response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'Ramdisk.Value' => "#{value}" })
-         if (response.status != 200)
-            raise "I couldn't modify the ramdisk_id of ec2 instance #{@property_hash[:instance_id]}"
-         end
-		end
-   end
-
-	def user_data
-		(@property_hash == {}) ? @resource[:user_data] : @property_hash[:user_data] 
-   end
-
-	# updating the user_data can only be done by destroying and recreating an instance-store style instance
-	# or by stopping and starting an ebs style instance.
-	def user_data=(value)
-		case @property_hash[:root_device_type]
-		when 'instance-store'
-			case @property_hash[:ensure]
-			when 'terminated','shutting-down','absent'
-				fail "Sorry, I can't change the user_data of an instance store instance which is #{@property_hash[:ensure]}"
-			when 'running'
-				notice "#{resource[:name]} is an instance-store instance: terminating and re-creating with new user_data"
-				destroy(:true)
-				create
-			end
-		when 'ebs'
-			case @property_hash[:ensure]
-			when 'terminated','shutting-down','absent'
-				fail "Sorry, I can't change the user_data of an ebs instance which is #{@property_hash[:ensure]}"
-			when 'stopped'
-         	debug "Changing the user_data on a stopped ebs instance"
-				modify_user_data(value)
-			when 'running','pending'
-				notice "#{resource[:name]} is an ebs instance: stopping and starting with new user_data"
-				stop(:true)
-				modify_user_data(value)
-				start				
+		# If the instance wasn't terminated then we might need to apply some other changes when stopped.
+		if (@change_when_stopped && @property_hash[:root_device_type] == 'ebs')
+			if (@property_hash[:ensure] =~ /^(running|pending)$/)
+				notice "Ebs instance #{@resource[:name]} is being stopped to make property changes."
+				stop
+				max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+				wait_state(@property_hash[:name],'stopped',max)
 			end
 		end
-   end
 
-	def monitoring_enabled
-		(@property_hash == {}) ? @resource[:monitoring_enabled] : @property_hash[:monitoring_enabled] 
-   end
-
-	def monitoring_enabled=(value)
-		debug "TODO: Enable/disable monitoring..."
-   end
-
-	def tags
-		(@property_hash == {}) ? @resource[:tags] : @property_hash[:tags] 
-   end
-
-	def tags=(value)
-		debug "#{@resource[:name]} needs its tags updating..."
-		debug "Requested tags (YAML):-\n#{@resource[:tags].to_yaml}"
-		debug "Actual tags (YAML):-\n#{@property_hash[:tags].to_yaml}"
-		assign_tags(@property_hash[:instance_id],value)
+		notice "Making the following property changes to Instance #{@resource[:name]}:-\n#{@change_when_stopped.merge(@change_whenever).to_yaml}"
+		@change_when_stopped.merge(@change_whenever).each do |k,v|
+			send("flush_#{k}=",v)
+		end
+			
+		if (@property_hash[:ensure] =~ /^(running|pending)$/)
+			notice "Ebs instance #{@resource[:name]} is being started again."
+			start
+		end
 	end
-
-	#---------------------------------------------------------------------------------------------------
-	# Helper Methods
 
 	# for looking up information about an ec2 instance given the Name tag
 	def instanceinfo(name)
@@ -771,11 +591,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Functions for storing and retreiving user_data from the 
 	# aws yaml file.
 
-	def self.lookup_user_data(name)
-		udata = PuppetX::Practicalclouds::Storable::load('user_data')
-      udata[name]
-	end
-
 	def save_user_data(name,data)
 		udata = PuppetX::Practicalclouds::Storable::load('user_data')
 		udata[name] = data
@@ -789,17 +604,5 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			PuppetX::Practicalclouds::Storable::store('user_data',udata)
 		end
 	end
-
-	def modify_user_data(value)
-		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-		debug "compute.modify_instance_attribute(#{@property_hash[:instance_id]},{ 'UserData.Value' => \"#{value}\" })"
-		encoded=Base64.encode64(value)
-		response = compute.modify_instance_attribute(@property_hash[:instance_id], { 'UserData.Value' => "#{encoded}" })
-		if (response.status != 200)
-			raise "I couldn't modify the user_data of ec2 instance #{@property_hash[:instance_id]}"
-		end
-		save_user_data(@property_hash[:name],value)
-	end
-
 
 end
