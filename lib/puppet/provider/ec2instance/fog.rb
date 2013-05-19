@@ -64,10 +64,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
 						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
 
-						# lookup user_data from our yaml file
-						udata = lookup_user_data(myname)
-						if (udata) 
-							instprops[:user_data] = udata
+						# lookup user_data and image_filter from our yaml file
+						[ 'user_data', 'image_filter' ].each do |area|
+							value = lookup_yaml(area,myname)
+							if (value) 
+								instprops[area.to_sym] = value
+							end
 						end
 
 						if (instprops[:root_device_type] == 'ebs')
@@ -104,9 +106,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	def self.lookup_user_data(name)
-		udata = PuppetX::Practicalclouds::Storable::load('user_data')
-		udata[name]
+	def self.lookup_yaml(area,name)
+		data = PuppetX::Practicalclouds::Storable::load(area)
+		data[name]
 	end
 
 	#---------------------------------------------------------------------------------------------------
@@ -194,7 +196,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	# We want to return the value of the prefected property_hash but if it does not exist then
 	# we want to return the value of the resource so that each property does not try to update itself.
-	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
+	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id image_filter subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
 		define_method property do
 			(@property_hash == {}) ? @resource[property.to_sym] : @property_hash[property.to_sym]
 		end
@@ -210,7 +212,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	# Define properties which can be only be changed by terminating and recreating the instance
-	%w(availability_zone region image_id subnet_id key_name ).each do |property|
+	%w(availability_zone region image_id image_filter subnet_id key_name ).each do |property|
 		define_method "#{property}=" do |value|
 			if (@change_when_terminated)
 				@change_when_terminated[property.to_sym] = value
@@ -221,7 +223,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	# Define properties which can be changed by stopping an ebs instance and using modify_instance_attributes
-	%w(instance_type kernel_id ramdisk_id disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized).each do |property|
+	%w(instance_type kernel_id ramdisk_id disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids ebs_optimized).each do |property|
 		define_method "#{property}=" do |value|
 			if (@change_when_stopped)
 				@change_when_stopped[property.to_sym] = value
@@ -234,7 +236,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	# Properties which require unqiue handling 
+	# Properties which can be changed at any time
 	%w(monitoring_enabled tags).each do |property|
 		define_method "#{property}=" do |value|
 			if (@change_whenever)
@@ -249,9 +251,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	def user_data=(value)
 		if (@change_when_stopped)
-			@change_when_stopped[property.to_sym] = value
+			@change_when_stopped[:user_data] = value
 		else
-			@change_when_stopped={property.to_sym => value}
+			@change_when_stopped={:user_data => value}
 		end
 	end
 
@@ -259,6 +261,16 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		enc=Base64.encode64(value)
 		modify_attribute('user_data',enc)
 		save_user_data(@property_hash[:name],value)
+	end
+
+	# security_group_names need to be changed to ids in order
+	# to be updated...
+	def security_group_names=(value)
+		if (@change_when_stopped)
+			@change_when_stopped[:security_group_ids] = lookup_security_groupids(value)
+		else
+			@change_when_stopped={:security_group_ids => lookup_security_groupids(value) }
+		end
 	end
 
 	# Property setters which get called by flush
@@ -372,9 +384,10 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource[:tags])
 
-			# save the user_data on the puppet master because we can't
+			# save the user_data and image_filter on the puppet master because we can't
 			# access it through the amazon api
-			save_user_data(@resource[:name], @resource[:user_data]) if @resource[:user_data]
+			store_in_yaml('user_data', @resource[:name], @resource[:user_data]) if @resource[:user_data]
+			store_in_yaml('image_filter', @resource[:name], @resource[:image_filter]) if @resource[:image_filter]
 
 			# optionally wait for the instance to be "running"
 			optional_wait('running')
@@ -399,8 +412,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			notice "Instance #{@property_hash[:instance_id]} is #{@property_hash[:ensure]}"
 		end
 
-		# remove any associated user data from the aws yaml file
-		remove_user_data(@property_hash[:name])
+		# remove any associated user_data and image_filter from the aws yaml file
+		remove_from_yaml('user_data',name)
+		remove_from_yaml('image_filter',name)
 
 		notice "Removing Name tag #{@property_hash[:name]} from #{@property_hash[:instance_id]}"
 		debug "compute.delete_tags(#{@property_hash[:instance_id]},{ 'Name' => #{@property_hash[:name]}})"
@@ -450,27 +464,47 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	# Flush - write out the changes which require a restart or applying whilst stopped.
 	def flush
+		debug "ec2instance - calling flush"
+		changes = {}
+		changes.merge!(@change_when_terminated) if (@change_when_terminated)
+		changes.merge!(@change_when_stopped) if (@change_when_stopped)
+		changes.merge!(@change_whenever) if (@change_whenever)
+
+		if (changes)
+			# turn all the keys to strings for display...
+			changes = changes.inject({}){|memo,(k,v)| memo[k.to_s] = v; memo}
+			notice "Making the following property changes to Instance #{@resource[:name]}:-\n#{changes.to_yaml}"
+		end
+
 		# If we need to terminate the instance then all changes will be made by creating the new instance.
 		if (@change_when_terminated || (@change_when_stopped && @property_hash[:root_device_type] == 'instance_store'))
-			notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the following property changes:-\n#{@change_when_terminated.merge(@change_when_stopped).to_yaml}"
+			notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the changes"
 			destroy
 			create
 			return
 		end
 
+		debug "The ec2instance does not need to be terminated."
 		# If the instance wasn't terminated then we might need to apply some other changes when stopped.
 		if (@change_when_stopped && @property_hash[:root_device_type] == 'ebs')
 			if (@property_hash[:ensure] =~ /^(running|pending)$/)
-				notice "Ebs instance #{@resource[:name]} is being stopped to make property changes."
+				notice "Ebs instance #{@resource[:name]} is being stopped to make the property changes."
 				stop
 				max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 				wait_state(@property_hash[:name],'stopped',max)
 			end
 		end
 
-		notice "Making the following property changes to Instance #{@resource[:name]}:-\n#{@change_when_stopped.merge(@change_whenever).to_yaml}"
-		@change_when_stopped.merge(@change_whenever).each do |k,v|
-			send("flush_#{k}=",v)
+		if (@change_when_stopped)
+			@change_when_stopped.each do |k,v|
+				send("flush_#{k}=",v)
+			end
+		end
+
+		if (@change_whenever)
+			@change_whenever.each do |k,v|
+				send("flush_#{k}=",v)
+			end
 		end
 
 		if (@property_hash[:ensure] =~ /^(running|pending)$/)
@@ -588,20 +622,56 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	# Functions for storing and retreiving user_data from the 
-	# aws yaml file.
 
-	def save_user_data(name,data)
-		udata = PuppetX::Practicalclouds::Storable::load('user_data')
-		udata[name] = data
-		PuppetX::Practicalclouds::Storable::store('user_data',udata)
+   def lookup_security_groupids(groupnames)
+      groupmap = {}
+      compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+      response = compute.describe_security_groups
+      raise "Sorry, I could not read the security groups!" if (response.status != 200)
+      response.body['securityGroupInfo'].each do |sg|
+         groupmap[sg['groupName']]=sg['groupId']
+      end
+
+      groupids=[]
+      groupnames.each do |name|
+         if (groupmap[name])
+            groupids << groupmap[name]
+         else
+            fail "Sorry, I could not find a group id for group name #{name}"
+         end
+      end
+      groupids
+   end
+
+	# lookup an ami using a filter hash, e.g.
+	# { 'is-public' => 'true', 'architecture' => 'x86_64', 'platform' => 'windows' }
+	def lookup_image(filter)
+      compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
+		debug "compute.describe_images(filter)\nFilter is:-\n#{filter.to_yaml}"
+      response = compute.describe_images(filter)
+      raise "Sorry, I could not read the images!" if (response.status != 200)
+		if (response['imagesSet'].length == 0)
+			raise "Sorry, I could not find any images matching the filter:-\n#{filter.to_yaml}"
+		elsif (response['imagesSet'].length > 1)
+			raise "Sorry, more than one image matches the filter:-\n#{filter.to_yaml}!\nPlease make the name more specific until it matches a single ami image"
+		else
+			response.body['imagesSet'][0]['imageId']
+		end
 	end
 
-	def remove_user_data(name)
-		udata = PuppetX::Practicalclouds::Storable::load('user_data')
-		if (udata[name])
-			udata.delete(name)
-			PuppetX::Practicalclouds::Storable::store('user_data',udata)
+	# Functions for storing and retreiving data from the aws yaml file.
+
+	def store_in_yaml(area,name,value)
+		data = PuppetX::Practicalclouds::Storable::load(area)
+		data[name] = value
+		PuppetX::Practicalclouds::Storable::store(area,data)
+	end
+
+	def remove_from_yaml(area,name)
+		data = PuppetX::Practicalclouds::Storable::load(area)
+		if (data[name])
+			data.delete(name)
+			PuppetX::Practicalclouds::Storable::store(area,data)
 		end
 	end
 

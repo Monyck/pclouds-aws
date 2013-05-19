@@ -107,9 +107,12 @@ Puppet::Type.newtype(:ec2instance) do
 	end
 
 	newproperty(:image_id) do
-		desc "The image_id for the AMI to boot from"
-		isrequired
+		desc "The image_id for the AMI to boot from (required - unless you specify an image_filter)"
 		newvalues(/^ami-/)
+	end
+
+	newproperty(:image_filter) do
+		desc "Select the AMI to boot from using a filter hash, e.g. { 'name' => 'Fedora17-x86_64-practicalclouds*' }.  The filter must match a single ami image.  By using the filter rather than image_id will allow you to more easiliy move an instance between regions (so long as the filter matches the right image in the new region!). See http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeImages.html for more information."
 	end
 
 	newproperty(:key_name) do
@@ -151,106 +154,6 @@ Puppet::Type.newtype(:ec2instance) do
 
 	newproperty(:private_ip_address) do
 		desc "[EC2-VPC] You can optionally use this parameter to assign the instance a specific available IP address from the IP address range of the subnet as the primary IP address."
-	end
-
-	newproperty(:instance_id) do
-		desc "READONLY: The amazon AWS instanceId of the instance"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:ip_address) do
-		desc "READONLY: The public IP address of the instance"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:architecture) do
-		desc "READONLY: i386 or x86_64"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:dns_name) do
-		desc "READONLY: The instances public DNS name"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:private_dns_name) do
-		desc "READONLY: The instances private DNS name"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:root_device_type) do
-		desc "READONLY: The type of the root device"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:launch_time) do
-		desc "READONLY: The time an instance was launched"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:virtualization_type) do
-		desc "READONLY: The type of virtualization"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:owner_id) do
-		desc "READONLY: The AWS ID of the Owner"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
-	end
-
-	newproperty(:network_interfaces, :array_matching => :all) do
-		desc "READONLY: Network inferface information"
-		munge do |v|
-			nil
-		end
-		unmunge do |v|
-			nil
-		end
 	end
 
 	newproperty(:tags ) do
@@ -312,6 +215,19 @@ Puppet::Type.newtype(:ec2instance) do
 	#		YAML.dump(value)
 	#	end
 	#end
+
+   # READONLY Properties
+   %w(instance_id ip_address architecture dns_name private_dns_name root_device_type launch_time virtualization_type owner_id network_interfaces).each do |property|
+      newproperty(property.to_sym) do
+         desc "READONLY: The amazon AWS #{property} of the instance"
+         munge do |v|
+            nil
+         end
+         unmunge do |v|
+            nil
+         end
+      end
+   end
 
 	# --------------------------------------------------------------------------------------------------------------
 	# Validation and autorequires... 
