@@ -58,6 +58,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 						instprops[:root_device_type] = y['rootDeviceType'] if y['rootDeviceType']
 						instprops[:launch_time] = y['launchTime'] if y['launchTime']
 						instprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
+						instprops[:vpc_id] = y['vpcId'] if y['vpcId']
+						instprops[:subnet_id] = y['subnetId'] if y['subnetId']
 						instprops[:owner_id] = y['ownerId'] if y['ownerId']
 						instprops[:tags] = y['tagSet'] if y['tagSet']
 						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
@@ -196,7 +198,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	# We want to return the value of the prefected property_hash but if it does not exist then
 	# we want to return the value of the resource so that each property does not try to update itself.
-	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id image_filter subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
+	%w(instance_id virtualization_type private_ip_address ip_address architecture disable_api_termination dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id image_filter vpc_id subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
 		define_method property do
 			(@property_hash == {}) ? @resource[property.to_sym] : @property_hash[property.to_sym]
 		end
@@ -205,75 +207,45 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# setters...
 
 	# Define methods for strictly read-only properties...
-	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces).each do |property|
+	%w(instance_id virtualization_type private_ip_address ip_address architecture dns_name private_dns_name root_device_type launch_time owner_id network_interfaces vpc_id).each do |property|
 		define_method "#{property}=" do
-			fail "Sorry, you are not allowed to change the property #{property} - do not use it in your manifests."
+			fail "Sorry, you are not allowed to change the property READ-ONLY #{property} - please do not include it in your manifests."
 		end
 	end
 
 	# Define properties which can be only be changed by terminating and recreating the instance
-	%w(availability_zone region image_id image_filter subnet_id key_name ).each do |property|
+	%w(availability_zone region image_id image_filter subnet_id key_name).each do |property|
 		define_method "#{property}=" do |value|
-			if (@change_when_terminated)
-				@change_when_terminated[property.to_sym] = value
-			else
-				@change_when_terminated={property.to_sym => value}
-			end
+			change_when('terminated',property,value)
 		end
 	end
 
 	# Define properties which can be changed by stopping an ebs instance and using modify_instance_attributes
-	%w(instance_type kernel_id ramdisk_id disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids ebs_optimized).each do |property|
+	%w(instance_type kernel_id ramdisk_id).each do |property|
 		define_method "#{property}=" do |value|
-			if (@change_when_stopped)
-				@change_when_stopped[property.to_sym] = value
-			else
-				@change_when_stopped={property.to_sym => value}
-			end
+			change_when('stopped',property,value)
 		end
 		define_method "flush_#{property}=" do |value|
 			modify_attribute(property,value)
 		end
 	end
 
-	# Properties which can be changed at any time
+	# Properties which can be changed at any time via modify_attribute
+	%w(disable_api_temination instance_initiated_shutdown_behavior block_device_mapping ebs_optimized).each do |property|
+		define_method "#{property}=" do |value|
+			change_when('anytime',property,value)
+		end
+		define_method "flush_#{property}=" do |value|
+			modify_attribute(property,value)
+		end
+	end
+
+	# properties which can change at any time but need special flush methods which we will define below.
 	%w(monitoring_enabled tags).each do |property|
 		define_method "#{property}=" do |value|
-			if (@change_whenever)
-				@change_whenever[property.to_sym] = value
-			else
-				@change_whenever={property.to_sym => value}
-			end
+			change_when('anytime',property,value)
 		end
 	end
-
-	# User data needs it own special setters..
-
-	def user_data=(value)
-		if (@change_when_stopped)
-			@change_when_stopped[:user_data] = value
-		else
-			@change_when_stopped={:user_data => value}
-		end
-	end
-
-	def flush_user_data=(value)
-		enc=Base64.encode64(value)
-		modify_attribute('user_data',enc)
-		save_user_data(@property_hash[:name],value)
-	end
-
-	# security_group_names need to be changed to ids in order
-	# to be updated...
-	def security_group_names=(value)
-		if (@change_when_stopped)
-			@change_when_stopped[:security_group_ids] = lookup_security_groupids(value)
-		else
-			@change_when_stopped={:security_group_ids => lookup_security_groupids(value) }
-		end
-	end
-
-	# Property setters which get called by flush
 
 	def flush_monitoring_enabled=(value)
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)	
@@ -293,6 +265,58 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		debug "Requested tags (YAML):-\n#{@resource[:tags].to_yaml}"
 		debug "Actual tags (YAML):-\n#{@property_hash[:tags].to_yaml}"
 		assign_tags(@property_hash[:instance_id],value)
+	end
+
+	# Special changers and flush...
+
+	def user_data=(value)
+		change_when('stopped','user_data',value)
+	end
+
+	def flush_user_data=(value)
+		enc=Base64.encode64(value)
+		modify_attribute('user_data',enc)
+		store_in_yaml('user_data',@property_hash[:name],value)
+	end
+
+	# VPC only can be changed whenever otherwise we need to terminate to change
+	%w(security_group_ids).each do |property|
+		define_method "#{property}=" do |value|
+			if (@property_hash[:vpc_id])
+				change_when('stopped','security_group_ids',value)
+			else
+				change_when('terminated','security_group_ids',value)
+			end
+		end
+		define_method "flush_#{property}=" do |value|
+			modify_attribute(property,value)
+		end
+	end
+
+	# Properties whc
+	%w(source_dest_check).each do |property|
+      define_method "#{property}=" do |value|
+         if (@property_hash[:vpc_id])
+            change_when('anytime','source_dest_check',value)
+         elsif(@resource[:subnet_id])
+				change_when('terminated','source_dest_check',value)
+			else
+				fail "Sorry, you can only change the source_dest_check property on VPC instances (instances launched into a subnet)."
+         end
+      end
+      define_method "flush_#{property}=" do |value|
+         modify_attribute(property,value)
+      end
+   end
+
+	# security_group_names need to be changed to ids in order
+	# to be updated...
+	def security_group_names=(value)
+		if (@property_hash[:vpc_id])
+			change_when('stopped','security_group_ids',lookup_security_groupids(value))
+		else
+			change_when('terminated','security_group_ids',lookup_security_groupids(value))
+		end
 	end
 
 	#---------------------------------------------------------------------------------------------------
@@ -423,7 +447,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
 		end
 		# delete the property_hash - this instance no longer exists.
-		@property_hash = {}
+		#@property_hash = {}
 	end
 
 	def stop
@@ -462,54 +486,64 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		raise "Sorry, I couldn't modify the #{k} of ec2 instance #{@property_hash[:instance_id]}" if (response.status != 200)
 	end
 
+   def change_when(w,p,v)
+      @my_changes = {} if (!@my_changes)
+      if @my_changes[w]
+         @my_changes[w][p] = v
+      else
+         @my_changes[w] = {p => v}
+      end
+   end
+
 	# Flush - write out the changes which require a restart or applying whilst stopped.
 	def flush
 		debug "ec2instance - calling flush"
-		changes = {}
-		changes.merge!(@change_when_terminated) if (@change_when_terminated)
-		changes.merge!(@change_when_stopped) if (@change_when_stopped)
-		changes.merge!(@change_whenever) if (@change_whenever)
 
-		if (changes)
-			# turn all the keys to strings for display...
-			changes = changes.inject({}){|memo,(k,v)| memo[k.to_s] = v; memo}
-			notice "Making the following property changes to Instance #{@resource[:name]}:-\n#{changes.to_yaml}"
-		end
+		if (@my_changes)
 
-		# If we need to terminate the instance then all changes will be made by creating the new instance.
-		if (@change_when_terminated || (@change_when_stopped && @property_hash[:root_device_type] == 'instance_store'))
-			notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the changes"
-			destroy
-			create
-			return
-		end
+			# If we need to terminate the instance then all changes will be made by creating the new instance.
+			if (@my_changes['terminated'] || (@my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store'))
+				notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the changes"
+				destroy
+				create
+				if (@property_hash[:root_device_type] == 'ebs' && @resource[:ensure] == :stopped)
+					notice "Instance #{@resource[:name]} needs to be stopped again once it has started"
+					wait_state(@property_hash[:name],'running',max)
+					debug "Calling stop"
+					stop
+				else
+					debug "Instance #{@resource[:name]} does not need to be immediately stopped: #{@property_hash[:root_device_type]} / #{@resource[:ensure]}"
+				end
+				return
+			end
 
-		debug "The ec2instance does not need to be terminated."
-		# If the instance wasn't terminated then we might need to apply some other changes when stopped.
-		if (@change_when_stopped && @property_hash[:root_device_type] == 'ebs')
+			debug "The ec2instance does not need to be terminated."
+			# If the instance wasn't terminated then we might need to apply some other changes when stopped.
+			if (@my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
+				if (@property_hash[:ensure] =~ /^(running|pending)$/)
+					notice "Ebs instance #{@resource[:name]} is being stopped to make the property changes."
+					stop
+					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+					wait_state(@property_hash[:name],'stopped',max)
+				end
+			end
+
+			if (@my_changes['stopped'])
+				@my_changes['stopped'].each do |k,v|
+					send("flush_#{k}=",v)
+				end
+			end
+
+			if (@my_changes['anytime'])
+				@my_changes['anytime'].each do |k,v|
+					send("flush_#{k}=",v)
+				end
+			end
+
 			if (@property_hash[:ensure] =~ /^(running|pending)$/)
-				notice "Ebs instance #{@resource[:name]} is being stopped to make the property changes."
-				stop
-				max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
-				wait_state(@property_hash[:name],'stopped',max)
+				notice "Ebs instance #{@resource[:name]} is being started again."
+				start
 			end
-		end
-
-		if (@change_when_stopped)
-			@change_when_stopped.each do |k,v|
-				send("flush_#{k}=",v)
-			end
-		end
-
-		if (@change_whenever)
-			@change_whenever.each do |k,v|
-				send("flush_#{k}=",v)
-			end
-		end
-
-		if (@property_hash[:ensure] =~ /^(running|pending)$/)
-			notice "Ebs instance #{@resource[:name]} is being started again."
-			start
 		end
 	end
 
@@ -558,9 +592,11 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end
 
 	def optional_wait(desired_state)
+		debug "optional_wait: #{desired_state}"
 		wait=(@resource[:wait] == :true) ? :true : :false
 		max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 		if (wait == :true)
+			debug "calling wait_state(#{@resource[:name]},#{desired_state},#{max})"
 			wait_state(@resource[:name],desired_state,max)
 		end
 	end

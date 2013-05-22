@@ -217,7 +217,7 @@ Puppet::Type.newtype(:ec2instance) do
 	#end
 
    # READONLY Properties
-   %w(instance_id ip_address architecture dns_name private_dns_name root_device_type launch_time virtualization_type owner_id network_interfaces).each do |property|
+   %w(vpc_id instance_id ip_address architecture dns_name private_dns_name root_device_type launch_time virtualization_type owner_id network_interfaces).each do |property|
       newproperty(property.to_sym) do
          desc "READONLY: The amazon AWS #{property} of the instance"
          munge do |v|
