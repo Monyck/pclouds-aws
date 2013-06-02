@@ -133,64 +133,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 	end
 
-	# ensurable replacement: decide what to do when requested to change between our states.
-	# Call our exists?, create and destory methods to do the work as though we are ensurable.
+	# defer the state change to the flush method...
 	def ensure=(value)
 		debug "I need to proces #{@resource[:name]} to #{value}"
-		case value.to_s
-		when 'pending','shutting-down'
-			fail("Sorry! You are not allowed to set ec2instances into the 'pending' or 'stutting-down' states.")
-		when 'terminated', 'absent'
-			if (exists?)
-				case @property_hash[:ensure]
-				when 'pending','running','stopping','stopped'
-					destroy
-				when 'shutting-down'
-					info "Instance #{@property_hash[:name]} is already shutting-down."
-				else
-					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-				end
-			end
-		when 'running','present'
-			if (exists?)
-				case @property_hash[:ensure]
-				when 'shutting-down'
-					debug "#{@property_hash[:name]} is shutting_down"
-				when 'terminated'
-					debug "Found a terminated instance #{property_hash[:instance_id]} with name #{@property_hash[:name]} : removing and starting a new one"
-					destroy
-					create
-				when 'stopped','stopping'
-					start
-				when 'pending'
-					info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
-				else
-					fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-				end
-			else
-				debug "No instance #{@resource[:name]} exists, create a new one.."
-				create
-			end
-		when 'stopped'
-			if (exists?)
-				case @property_hash[:ensure]
-				when 'terminated'
-					fail "Sorry, I can't stop a terminated instance"	
-				when 'shutting-down'
-					info "Instance #{@resource[:name]} is already shutting-down, try stopping it once running."
-				when 'stopping'
-					info "Instance #{@resource[:name]} is already stopping."
-				when 'running','pending'
-					stop
-				end
-			else
-				fail("Sorry, can't stop non-existent ec2instance #{@resource[:name]}")
-			end
-		else
-			fail "I'm lost as to how I ensure ec2instance is '#{value}'"
-		end
+		debug "state changes are handled in the flush method"
 	end
-
+		
 	#---------------------------------------------------------------------------------------------------
 	# Property Accessors 
 
@@ -216,14 +164,14 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Define properties which can be only be changed by terminating and recreating the instance
 	%w(availability_zone region image_id image_filter subnet_id key_name).each do |property|
 		define_method "#{property}=" do |value|
-			change_when('terminated',property,value)
+			schedule_change('terminated',property,value)
 		end
 	end
 
 	# Define properties which can be changed by stopping an ebs instance and using modify_instance_attributes
 	%w(instance_type kernel_id ramdisk_id).each do |property|
 		define_method "#{property}=" do |value|
-			change_when('stopped',property,value)
+			schedule_change('stopped',property,value)
 		end
 		define_method "flush_#{property}=" do |value|
 			modify_attribute(property,value)
@@ -233,7 +181,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Properties which can be changed at any time via modify_attribute
 	%w(disable_api_temination instance_initiated_shutdown_behavior block_device_mapping ebs_optimized).each do |property|
 		define_method "#{property}=" do |value|
-			change_when('anytime',property,value)
+			schedule_change('anytime',property,value)
 		end
 		define_method "flush_#{property}=" do |value|
 			modify_attribute(property,value)
@@ -243,7 +191,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# properties which can change at any time but need special flush methods which we will define below.
 	%w(monitoring_enabled tags).each do |property|
 		define_method "#{property}=" do |value|
-			change_when('anytime',property,value)
+			schedule_change('anytime',property,value)
 		end
 	end
 
@@ -270,7 +218,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Special changers and flush...
 
 	def user_data=(value)
-		change_when('stopped','user_data',value)
+		schedule_change('stopped','user_data',value)
 	end
 
 	def flush_user_data=(value)
@@ -283,9 +231,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	%w(security_group_ids).each do |property|
 		define_method "#{property}=" do |value|
 			if (@property_hash[:vpc_id])
-				change_when('stopped','security_group_ids',value)
+				schedule_change('stopped','security_group_ids',value)
 			else
-				change_when('terminated','security_group_ids',value)
+				schedule_change('terminated','security_group_ids',value)
 			end
 		end
 		define_method "flush_#{property}=" do |value|
@@ -297,9 +245,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	%w(source_dest_check).each do |property|
       define_method "#{property}=" do |value|
          if (@property_hash[:vpc_id])
-            change_when('anytime','source_dest_check',value)
+            schedule_change('anytime','source_dest_check',value)
          elsif(@resource[:subnet_id])
-				change_when('terminated','source_dest_check',value)
+				schedule_change('terminated','source_dest_check',value)
 			else
 				fail "Sorry, you can only change the source_dest_check property on VPC instances (instances launched into a subnet)."
          end
@@ -313,9 +261,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# to be updated...
 	def security_group_names=(value)
 		if (@property_hash[:vpc_id])
-			change_when('stopped','security_group_ids',lookup_security_groupids(value))
+			schedule_change('stopped','security_group_ids',lookup_security_groupids(value))
 		else
-			change_when('terminated','security_group_ids',lookup_security_groupids(value))
+			schedule_change('terminated','security_group_ids',lookup_security_groupids(value))
 		end
 	end
 
@@ -446,8 +394,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		if (response.status != 200)
 			raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
 		end
-		# delete the property_hash - this instance no longer exists.
-		#@property_hash = {}
+		# remove the property_hash because the instance no longer exists
+		@property_hash={}
 	end
 
 	def stop
@@ -486,7 +434,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		raise "Sorry, I couldn't modify the #{k} of ec2 instance #{@property_hash[:instance_id]}" if (response.status != 200)
 	end
 
-   def change_when(w,p,v)
+   def schedule_change(w,p,v)
       @my_changes = {} if (!@my_changes)
       if @my_changes[w]
          @my_changes[w][p] = v
@@ -495,56 +443,164 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
       end
    end
 
-	# Flush - write out the changes which require a restart or applying whilst stopped.
+      case value.to_s
+      when 'pending','shutting-down'
+         fail("Sorry! You are not allowed to set ec2instances into the 'pending' or 'stutting-down' states.")
+      when 'terminated', 'absent'
+         if (exists?)
+            case @property_hash[:ensure]
+            when 'pending','running','stopping','stopped'
+               destroy
+            when 'shutting-down'
+               info "Instance #{@property_hash[:name]} is already shutting-down."
+            else
+               fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
+            end
+         end
+      when 'running','present'
+         if (exists?)
+            case @property_hash[:ensure]
+            when 'shutting-down'
+               debug "#{@property_hash[:name]} is shutting_down"
+            when 'terminated'
+               debug "Found a terminated instance #{property_hash[:instance_id]} with name #{@property_hash[:name]} : removing and starting a new one"
+               destroy
+               create
+            when 'stopped','stopping'
+               start
+            when 'pending'
+               info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
+            else
+               fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
+            end
+         else
+            debug "No instance #{@resource[:name]} exists, create a new one.."
+            create
+         end
+      when 'stopped'
+         if (exists?)
+            case @property_hash[:ensure]
+            when 'terminated'
+               fail "Sorry, I can't stop a terminated instance"
+            when 'shutting-down'
+               info "Instance #{@resource[:name]} is already shutting-down, try stopping it once running."
+            when 'stopping'
+               info "Instance #{@resource[:name]} is already stopping."
+            when 'running','pending'
+               stop
+            end
+         else
+            fail("Sorry, can't stop non-existent ec2instance #{@resource[:name]}")
+         end
+      else
+         fail "I'm lost as to how I ensure ec2instance is '#{value}'"
+      end
+
+
+	# Flush - the brains of the outfit - it decides whether we need to be stopping, starting and 
+	# when to make changes.  All changes are controlled by flush.
+
+
+	#do I need to terminate?
+	#	(state or changes when terminated)
+	#
+	#do I need to stop?
+	#	(state or changes when stopped)
+	#
+	#do I need to make changes?
+	#	changes when stopped
+	#	changes anytime
+	#
+	#do I need to create?
+	#	(state)
+	#	(re-create)
+	#	(stop - if desired_state is stopped
+	#
+	#do I need to start?
+	#	start
+
 	def flush
 		debug "ec2instance - calling flush"
 
-		if (@my_changes)
+		desired_state = @resource[:ensure].to_s
+		present_state = @property_hash[:ensure].to_s
 
-			# If we need to terminate the instance then all changes will be made by creating the new instance.
-			if (@my_changes['terminated'] || (@my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store'))
-				notice "Instance #{@resource[:name]} is being terminated and re-created in order to make the changes"
+		# do I need to terminate?
+		if (exists?) 
+			if (desired_state =~ /^(terminated|absent)$/) 
+				notice "Instance #{@resource[:name]} is being terminated by ensure directive"
 				destroy
-				create
-				if (@property_hash[:root_device_type] == 'ebs' && @resource[:ensure] == :stopped)
-					notice "Instance #{@resource[:name]} needs to be stopped again once it has started"
-					wait_state(@property_hash[:name],'running',max)
-					debug "Calling stop"
-					stop
-				else
-					debug "Instance #{@resource[:name]} does not need to be immediately stopped: #{@property_hash[:root_device_type]} / #{@resource[:ensure]}"
-				end
-				return
-			end
-
-			debug "The ec2instance does not need to be terminated."
-			# If the instance wasn't terminated then we might need to apply some other changes when stopped.
-			if (@my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
-				if (@property_hash[:ensure] =~ /^(running|pending)$/)
-					notice "Ebs instance #{@resource[:name]} is being stopped to make the property changes."
-					stop
-					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
-					wait_state(@property_hash[:name],'stopped',max)
-				end
-			end
-
-			if (@my_changes['stopped'])
-				@my_changes['stopped'].each do |k,v|
-					send("flush_#{k}=",v)
-				end
-			end
-
-			if (@my_changes['anytime'])
-				@my_changes['anytime'].each do |k,v|
-					send("flush_#{k}=",v)
-				end
-			end
-
-			if (@property_hash[:ensure] =~ /^(running|pending)$/)
-				notice "Ebs instance #{@resource[:name]} is being started again."
-				start
+				present_state='terminated'
+			elsif (@my_changes['terminated'])
+				notice "Instance #{@resource[:name]} is being terminated to make changes which can only be made by terminating and recreating"
+				destroy
+				present_state='terminated'
+			elsif (@my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
+				notice "Instance #{@resource[:name]} is and instance store instance and so is being terminated to make changes (which could be made whilst stopped for ebs backed instances)"
+				destroy
+				present_state='terminated'
 			end
 		end
+
+		# do I need to stop?
+		if (exists?)
+			if (desired_state == 'stopped') 
+				if (present_state =~ /^(running|pending)$/)
+					if (@property_hash[:root_device_type] == 'ebs')
+						notice "Instance #{@resource[:name]} is being stopped by ensure directive"
+						stop 
+						present_state='stopped'
+					else
+						fail "Sorry, you can only stop EBS backed instances."
+					end
+				elsif (present_state == 'stopping')
+					notice "Instance #{@resource[:name]} is already stopping."
+				end
+			elsif (@my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
+				notice "Instance #{@resource[:name]} is being stopped to make required changes"
+				stop 
+				present_state='stopped'
+			end
+		end
+
+		#do I need to make changes?
+		if (exists?)
+			if (present_state == 'stopped')
+         	if (@my_changes['stopped'])
+					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+					wait_state(@property_hash[:name],'stopped',max)
+            	@my_changes['stopped'].each do |k,v|
+               	send("flush_#{k}=",v)
+            	end
+         	end
+			end
+
+         if (@my_changes['anytime'])
+            @my_changes['anytime'].each do |k,v|
+               send("flush_#{k}=",v)
+            end
+         end
+		end
+
+		#do I need to start?
+		if (exists?)
+			if (desired_state =~ /^(running|present)$/ && present_state == 'stopped')
+				notice "Instance #{@resource[:name]} is being started"
+				start 
+			end
+		end
+			
+		# do I need to be created?
+		if (!exists?)
+			if (desired_state =~ /^(present|running|stopped)$/)
+				notice "Instance #{@resource[:name]} is being created."
+				create
+				if (desired_state == 'stopped')
+					notice "The newly created instance #{@resource[:name]} needs to be stopped."
+					stop
+				end
+			end
+		end			
 	end
 
 	# for looking up information about an ec2 instance given the Name tag
