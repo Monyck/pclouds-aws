@@ -145,7 +145,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# getters... 
 
 	# We want to return the value of the prefected property_hash but if it does not exist then
-	# we want to return the value of the resource so that each property does not try to update itself.
+	# return the value of the resource so that each property does not try to update itself.
 	%w(instance_id virtualization_type private_ip_address ip_address architecture disable_api_termination dns_name private_dns_name root_device_type launch_time owner_id network_interfaces availability_zone region image_id image_filter vpc_id subnet_id key_name instance_type kernel_id ramdisk_id user_data disable_api_temination instance_initiated_shutdown_behavior block_device_mapping source_dest_check security_group_ids security_group_names ebs_optimized monitoring_enabled tags).each do |property|
 		define_method property do
 			(@property_hash == {}) ? @resource[property.to_sym] : @property_hash[property.to_sym]
@@ -231,7 +231,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	%w(security_group_ids).each do |property|
 		define_method "#{property}=" do |value|
 			if (@property_hash[:vpc_id])
-				schedule_change('stopped','security_group_ids',value)
+				schedule_change('anytime','security_group_ids',value)
 			else
 				schedule_change('terminated','security_group_ids',value)
 			end
@@ -261,7 +261,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# to be updated...
 	def security_group_names=(value)
 		if (@property_hash[:vpc_id])
-			schedule_change('stopped','security_group_ids',lookup_security_groupids(value))
+			schedule_change('anytime','security_group_ids',lookup_security_groupids(value))
 		else
 			schedule_change('terminated','security_group_ids',lookup_security_groupids(value))
 		end
@@ -271,10 +271,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	# Helper Methods
 
 	def exists?
-		debug "Checking if #{@resource[:name]} exists"
 		return nil if (!@property_hash)
 		(@property_hash[:ensure]) ? 1 : nil
-		end
+	end
 
 	def myregion
 		if (@property_hash[:region])
@@ -353,7 +352,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				@resource[:tags]['Name'] = @resource[:name]
 			end
 			instid = response.body['instancesSet'][0]['instanceId']
-			debug "Naming instance #{instid} : #{@resource['tags']['Name']}"
+			info "Instance #{instid} created as #{@resource[:name]}"
+			debug "Tagging instance #{instid} : #{@resource['tags']['Name']}"
 			assign_tags(instid,@resource[:tags])
 
 			# save the user_data and image_filter on the puppet master because we can't
@@ -363,6 +363,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 			# optionally wait for the instance to be "running"
 			optional_wait('running')
+
+			# set the property hash in case we need to do something after this.
+			@property_hash = { :ensure => 'pending', :instance_id => instid }
 		else
 			debug "The compute.run_instances call failed!"
 			raise "I couldn't create the ec2 instance, sorry! API Error!"
@@ -372,7 +375,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def destroy
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending|stopped|stopping)$/)
-			notice "Terminating ec2 instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
+			notice "Terminating ec2instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
 			debug "compute.terminate_instances(#{@property_hash[:instance_id]})"
 			response = compute.terminate_instances(@property_hash[:instance_id])
 			if (response.status != 200)
@@ -402,6 +405,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(running|pending)$/)
 			if (@property_hash[:root_device_type] == 'ebs')
+				notice "Stopping ec2instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
 				debug "compute.stop_instances([#{@property_hash[:instance_id]}])"
 				response = compute.stop_instances([@property_hash[:instance_id]])
 				if (response.status != 200)
@@ -417,6 +421,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def start
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		if (@property_hash[:ensure] =~ /^(stopping|stopped)$/)
+			notice "Starting ec2instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
 			debug "compute.start_instances([#{@property_hash[:instance_id]}])"
 			response = compute.start_instances([@property_hash[:instance_id]])
 			if (response.status != 200)
@@ -449,20 +454,29 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def flush
 		debug "ec2instance - calling flush"
 
-		desired_state = @resource[:ensure].to_s
 		present_state = @property_hash[:ensure].to_s
+		desired_state = @resource[:ensure].to_s
 
+		debug "Present state: #{present_state}"
+		debug "Desired state: #{desired_state}"
+
+		if (exists?)
+			debug "Instance #{@resource[:name]} exists"
+		else
+			debug "Instance #{@resource[:name]} does not exist"
+		end
+		
 		# do I need to terminate?
 		if (exists?) 
 			if (desired_state =~ /^(terminated|absent)$/) 
 				notice "Instance #{@resource[:name]} is being terminated by ensure directive"
 				destroy
 				present_state='terminated'
-			elsif (@my_changes['terminated'])
+			elsif (@my_changes && @my_changes['terminated'])
 				notice "Instance #{@resource[:name]} is being terminated to make changes which can only be made by terminating and recreating"
 				destroy
 				present_state='terminated'
-			elsif (@my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
+			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
 				notice "Instance #{@resource[:name]} is and instance store instance and so is being terminated to make changes (which could be made whilst stopped for ebs backed instances)"
 				destroy
 				present_state='terminated'
@@ -483,7 +497,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				elsif (present_state == 'stopping')
 					notice "Instance #{@resource[:name]} is already stopping."
 				end
-			elsif (@my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
+			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
 				notice "Instance #{@resource[:name]} is being stopped to make required changes"
 				stop 
 				present_state='stopped'
@@ -491,22 +505,24 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 
 		#do I need to make changes?
-		if (exists?)
-			if (present_state == 'stopped')
-         	if (@my_changes['stopped'])
-					max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
-					wait_state(@property_hash[:name],'stopped',max)
-            	@my_changes['stopped'].each do |k,v|
+		if (@my_changes)
+			if (exists?)
+				if (present_state == 'stopped')
+         		if (@my_changes['stopped'])
+						max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
+						wait_state(@property_hash[:name],'stopped',max)
+            		@my_changes['stopped'].each do |k,v|
+              			send("flush_#{k}=",v)
+            		end
+         		end
+				end
+
+         	if (@my_changes['anytime'])
+            	@my_changes['anytime'].each do |k,v|
                	send("flush_#{k}=",v)
             	end
          	end
 			end
-
-         if (@my_changes['anytime'])
-            @my_changes['anytime'].each do |k,v|
-               send("flush_#{k}=",v)
-            end
-         end
 		end
 
 		#do I need to start?
@@ -557,7 +573,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		elapsed_wait=0
 		check = instanceinfo(name)
 		if ( check )
-			notice "Waiting for instance #{name} to be #{desired_state}"
+			info "Waiting for instance #{name} to be #{desired_state}"
 			while ( check['instanceState']['name'] != desired_state && elapsed_wait < max ) do
 				debug "instance #{name} is #{check['instanceState']['name']}"
 				sleep 5
@@ -567,7 +583,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (elapsed_wait >= max)
 				raise "Timed out waiting for name to be #{desired_state}"
 			else
-				notice "Instance #{name} is now #{desired_state}"
+				info "Instance #{name} is #{desired_state}"
 			end
 		else
 			raise "Sorry, I couldn't find instance #{name}"
