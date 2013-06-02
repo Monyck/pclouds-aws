@@ -443,81 +443,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
       end
    end
 
-      case value.to_s
-      when 'pending','shutting-down'
-         fail("Sorry! You are not allowed to set ec2instances into the 'pending' or 'stutting-down' states.")
-      when 'terminated', 'absent'
-         if (exists?)
-            case @property_hash[:ensure]
-            when 'pending','running','stopping','stopped'
-               destroy
-            when 'shutting-down'
-               info "Instance #{@property_hash[:name]} is already shutting-down."
-            else
-               fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-            end
-         end
-      when 'running','present'
-         if (exists?)
-            case @property_hash[:ensure]
-            when 'shutting-down'
-               debug "#{@property_hash[:name]} is shutting_down"
-            when 'terminated'
-               debug "Found a terminated instance #{property_hash[:instance_id]} with name #{@property_hash[:name]} : removing and starting a new one"
-               destroy
-               create
-            when 'stopped','stopping'
-               start
-            when 'pending'
-               info "Instance #{@property_hash[:name]} : #{@property_hash[:instance_id]} is already starting up"
-            else
-               fail("I don't know how change #{@property_hash[:name]} from #{@property_hash[:ensure]} to #{value}")
-            end
-         else
-            debug "No instance #{@resource[:name]} exists, create a new one.."
-            create
-         end
-      when 'stopped'
-         if (exists?)
-            case @property_hash[:ensure]
-            when 'terminated'
-               fail "Sorry, I can't stop a terminated instance"
-            when 'shutting-down'
-               info "Instance #{@resource[:name]} is already shutting-down, try stopping it once running."
-            when 'stopping'
-               info "Instance #{@resource[:name]} is already stopping."
-            when 'running','pending'
-               stop
-            end
-         else
-            fail("Sorry, can't stop non-existent ec2instance #{@resource[:name]}")
-         end
-      else
-         fail "I'm lost as to how I ensure ec2instance is '#{value}'"
-      end
-
-
 	# Flush - the brains of the outfit - it decides whether we need to be stopping, starting and 
-	# when to make changes.  All changes are controlled by flush.
-
-
-	#do I need to terminate?
-	#	(state or changes when terminated)
-	#
-	#do I need to stop?
-	#	(state or changes when stopped)
-	#
-	#do I need to make changes?
-	#	changes when stopped
-	#	changes anytime
-	#
-	#do I need to create?
-	#	(state)
-	#	(re-create)
-	#	(stop - if desired_state is stopped
-	#
-	#do I need to start?
-	#	start
+	# making changes. 
 
 	def flush
 		debug "ec2instance - calling flush"
