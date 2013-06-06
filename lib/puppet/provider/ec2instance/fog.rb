@@ -365,7 +365,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			optional_wait('running')
 
 			# set the property hash in case we need to do something after this.
-			@property_hash = { :ensure => 'pending', :instance_id => instid }
+			@property_hash = { :ensure => 'pending', :instance_id => instid, :root_device_type => amirootdevicetype }
 		else
 			debug "The compute.run_instances call failed!"
 			raise "I couldn't create the ec2 instance, sorry! API Error!"
@@ -459,6 +459,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 		debug "Present state: #{present_state}"
 		debug "Desired state: #{desired_state}"
+		max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 
 		if (exists?)
 			debug "Instance #{@resource[:name]} exists"
@@ -466,6 +467,21 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			debug "Instance #{@resource[:name]} does not exist"
 		end
 		
+		# if we are stopping or starting an instance then we need to allow for changes to also be made
+		# default behavouir is just for ensure to be processed.
+		if (present_state != desired_state)
+			if (desired_state =~ /^(stopped|running|present)$/ && exists?)
+				@property_hash.each {|k,v|
+					if (@resource[k] && @resource[k].to_s != @property_hash[k].to_s)
+						if (k.to_s != 'ensure')
+							notice "#{k} changed from '#{@property_hash[k]}' to '#{@resource[k]}'"
+							send("#{k}=",@resource[k])
+						end
+					end
+				}
+			end
+		end
+				
 		# do I need to terminate?
 		if (exists?) 
 			if (desired_state =~ /^(terminated|absent)$/) 
@@ -486,7 +502,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		# do I need to stop?
 		if (exists?)
 			if (desired_state == 'stopped') 
-				if (present_state =~ /^(running|pending)$/)
+				if (present_state =~ /^(running)$/)
 					if (@property_hash[:root_device_type] == 'ebs')
 						notice "Instance #{@resource[:name]} is being stopped by ensure directive"
 						stop 
@@ -496,6 +512,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					end
 				elsif (present_state == 'stopping')
 					notice "Instance #{@resource[:name]} is already stopping."
+				elsif (present_state =~ /^pending$/)
+					notice "Instance #{@resource[:name]} is #{present_state}, need to wait for it to be running before stopping it."
+					wait_state(@property_hash[:name],'running',max)
 				end
 			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
 				notice "Instance #{@resource[:name]} is being stopped to make required changes"
@@ -507,10 +526,10 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		#do I need to make changes?
 		if (@my_changes)
 			if (exists?)
-				if (present_state == 'stopped')
+				if (present_state =~ /^(stopped|stopping)$/)
          		if (@my_changes['stopped'])
-						max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 						wait_state(@property_hash[:name],'stopped',max)
+						debug "Making changes which require the instance stopped"
             		@my_changes['stopped'].each do |k,v|
               			send("flush_#{k}=",v)
             		end
@@ -518,6 +537,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				end
 
          	if (@my_changes['anytime'])
+					debug "Making changes which can be made any time"
             	@my_changes['anytime'].each do |k,v|
                	send("flush_#{k}=",v)
             	end
@@ -540,6 +560,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				create
 				if (desired_state == 'stopped')
 					notice "The newly created instance #{@resource[:name]} needs to be stopped."
+					wait_state(@resource[:name],'running',max)
 					stop
 				end
 			end
