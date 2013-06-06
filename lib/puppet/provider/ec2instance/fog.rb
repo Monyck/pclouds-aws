@@ -24,7 +24,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','ap-southeast-1','ap-southeast-2','ap-northeast-1','sa-east-1'] if (regions==[])
 
 		# get a list of instances in all of the regions we are configured for.
-		allinstances=[]
+		allinstances={}
 		regions.each {|reg|	
 			compute = PuppetX::Practicalclouds::Awsaccess.connect(reg,'default')	
 			debug "Querying region #{reg}"
@@ -42,49 +42,59 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 							:region => reg,
 							:availability_zone => y['placement']['availabilityZone'] 
 						}
-						instprops[:ensure] = y['instanceState']['name'] if y['instanceState']['name']
-						instprops[:instance_id] = y['instanceId'] if y['instanceId']
-						instprops[:instance_type] = y['instanceType'] if y['instanceType']
-						instprops[:key_name] = y['keyName'] if y['keyName']
-						instprops[:kernel_id] = y['kernelId'] if y['kernelId']
-						instprops[:image_id] = y['imageId'] if y['imageId']
-						instprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
-						instprops[:subnet_id] = y['subnetId'] if y['subnetId']
-						instprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
-						instprops[:ip_address] = y['ipAddress'] if y['ipAddress']
-						instprops[:architecture] = y['architecture'] if y['architecture']
-						instprops[:dns_name] = y['dnsName'] if y['dnsName']
-						instprops[:private_dns_name] = y['privateDnsName'] if y['privateDnsName']
-						instprops[:root_device_type] = y['rootDeviceType'] if y['rootDeviceType']
-						instprops[:launch_time] = y['launchTime'] if y['launchTime']
-						instprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
-						instprops[:vpc_id] = y['vpcId'] if y['vpcId']
-						instprops[:subnet_id] = y['subnetId'] if y['subnetId']
-						instprops[:owner_id] = y['ownerId'] if y['ownerId']
-						instprops[:tags] = y['tagSet'] if y['tagSet']
-						instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
-						instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
-						instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
 
-						# lookup user_data and image_filter from our yaml file
-						[ 'user_data', 'image_filter' ].each do |area|
-							value = lookup_yaml(area,myname)
-							if (value) 
-								instprops[area.to_sym] = value
+						# check for duplicates!
+						if (allinstances[myname] && y['instanceState']['name'] != 'terminated')
+							err "Found duplicate instances, both #{allinstances[myname][:instance_id]} and #{y['instanceId']} have the Name '#{myname}'!  I can not manage these instances, please correct through another API or via the Amazon Web Console."
+							instprops[:ensure] = 'duplicate'
+							instprops[:instance_id] = "#{allinstances[myname][:instance_id]},#{y['instanceId']}"
+							instprops[:region] = "#{allinstances[myname][:region]},#{reg}"
+							instprops[:availability_zone] = "#{allinstances[myname][:availability_zone]},#{y['placement']['availabilityZone']}"
+						else
+							instprops[:ensure] = y['instanceState']['name'] if y['instanceState']['name']
+							instprops[:instance_id] = y['instanceId'] if y['instanceId']
+							instprops[:instance_type] = y['instanceType'] if y['instanceType']
+							instprops[:key_name] = y['keyName'] if y['keyName']
+							instprops[:kernel_id] = y['kernelId'] if y['kernelId']
+							instprops[:image_id] = y['imageId'] if y['imageId']
+							instprops[:ramdisk_id] = y['ramdiskId'] if y['ramdiskId']
+							instprops[:subnet_id] = y['subnetId'] if y['subnetId']
+							instprops[:private_ip_address] = y['privateIpAddress'] if y['privateIpAddress']
+							instprops[:ip_address] = y['ipAddress'] if y['ipAddress']
+							instprops[:architecture] = y['architecture'] if y['architecture']
+							instprops[:dns_name] = y['dnsName'] if y['dnsName']
+							instprops[:private_dns_name] = y['privateDnsName'] if y['privateDnsName']
+							instprops[:root_device_type] = y['rootDeviceType'] if y['rootDeviceType']
+							instprops[:launch_time] = y['launchTime'] if y['launchTime']
+							instprops[:virtualization_type] = y['virtualizationType'] if y['virtualizationType']
+							instprops[:vpc_id] = y['vpcId'] if y['vpcId']
+							instprops[:subnet_id] = y['subnetId'] if y['subnetId']
+							instprops[:owner_id] = y['ownerId'] if y['ownerId']
+							instprops[:tags] = y['tagSet'] if y['tagSet']
+							instprops[:network_interfaces] = y['networkInterfaces'] if y['networkInterfaces'] != []
+							instprops[:block_device_mapping] = y['blockDeviceMapping'] if y['blockDeviceMapping'] != []
+							instprops[:monitoring_enabled] = y['monitoring']['state'].to_s
+
+							# lookup user_data and image_filter from our yaml file
+							[ 'user_data', 'image_filter' ].each do |area|
+								value = lookup_yaml(area,myname)
+								if (value) 
+									instprops[area.to_sym] = value
+								end
 							end
-						end
 
-						if (instprops[:root_device_type] == 'ebs')
-							instprops[:ebs_optimized] = y['ebsOptimized'].to_s
-						end
+							if (instprops[:root_device_type] == 'ebs')
+								instprops[:ebs_optimized] = y['ebsOptimized'].to_s
+							end
 
-						instprops.merge!(secprops)
+							instprops.merge!(secprops)
+						end
 
 						# list all instances with Names or are not terminted.
 						if (instprops[:ensure] != 'terminated' || (instprops['tagSet'] && instprops['tagSet']['Name']))
-							allinstances << instprops
+							allinstances[myname] = instprops
 						end
-						end
+					end
 				end	
 			else
 				raise "Sorry, I could not retrieve a list of instances from #{region}!"
@@ -96,7 +106,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		#pp allinstances
 
 		# return the array of resources
-		allinstances.map {|x| new(x)}
+		allinstances.values.map {|x| new(x)}
 	end
 
 	def self.prefetch(resources)
@@ -398,12 +408,12 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			raise "I couldn't remove the Name tag from ec2 instance #{instance['instanceId']}"
 		end
 		# remove the property_hash because the instance no longer exists
-		@property_hash={}
+		@property_hash={ :ensure => 'terminated'}
 	end
 
 	def stop
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
-		if (@property_hash[:ensure] =~ /^(running|pending)$/)
+		if (@property_hash[:ensure] =~ /^(running)$/)
 			if (@property_hash[:root_device_type] == 'ebs')
 				notice "Stopping ec2instance #{@property_hash[:name]} : #{@property_hash[:instance_id]}"
 				debug "compute.stop_instances([#{@property_hash[:instance_id]}])"
@@ -411,6 +421,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				if (response.status != 200)
 					raise "I couldn't stop ec2 instance #{@property_hash[:instance_id]}"
 				end
+				@property_hash[:ensure]='stopping'
 				optional_wait('stopped')
 			else
 				raise "Sorry. I'm not able to stop an instance-store instance"
@@ -427,6 +438,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (response.status != 200)
 				raise "I couldn't start ec2 instance #{@property_hash[:instance_id]}"
 			end
+			@property_hash[:ensure]='pending'
 			optional_wait('running')
 		end
 	end
@@ -454,10 +466,9 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def flush
 		debug "ec2instance - calling flush"
 
-		present_state = @property_hash[:ensure].to_s
 		desired_state = @resource[:ensure].to_s
 
-		debug "Present state: #{present_state}"
+		debug "Present state: #{@property_hash[:ensure].to_s}"
 		debug "Desired state: #{desired_state}"
 		max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 
@@ -466,10 +477,16 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		else
 			debug "Instance #{@resource[:name]} does not exist"
 		end
+
+		# Make sure that we don't try and manage any unmanable instances, such as instances which 
+		# share the same Name tag
+		if (@property_hash[:ensure].to_s == 'duplicate')
+			fail "Sorry, the instance '#{@property_hash[:name]} can not be managed by puppet because duplicates exist.\nPuppet will not create duplicate instances and can not manage them.\nPlease do not mix the management of instances with puppet and other tools or APIs.\nRename or terminate the duplicate instances using the Amazon Web Console in order to manage with Puppet."
+		end
 		
 		# if we are stopping or starting an instance then we need to allow for changes to also be made
-		# default behavouir is just for ensure to be processed.
-		if (present_state != desired_state)
+		# default behavior is just for ensure to be processed.
+		if (@property_hash[:ensure].to_s != desired_state)
 			if (desired_state =~ /^(stopped|running|present)$/ && exists?)
 				@property_hash.each {|k,v|
 					if (@resource[k] && @resource[k].to_s != @property_hash[k].to_s)
@@ -487,48 +504,47 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			if (desired_state =~ /^(terminated|absent)$/) 
 				notice "Instance #{@resource[:name]} is being terminated by ensure directive"
 				destroy
-				present_state='terminated'
 			elsif (@my_changes && @my_changes['terminated'])
 				notice "Instance #{@resource[:name]} is being terminated to make changes which can only be made by terminating and recreating"
 				destroy
-				present_state='terminated'
 			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
 				notice "Instance #{@resource[:name]} is and instance store instance and so is being terminated to make changes (which could be made whilst stopped for ebs backed instances)"
 				destroy
-				present_state='terminated'
 			end
 		end
 
 		# do I need to stop?
 		if (exists?)
 			if (desired_state == 'stopped') 
-				if (present_state =~ /^(running)$/)
+				if (@property_hash[:ensure].to_s =~ /^(running)$/)
 					if (@property_hash[:root_device_type] == 'ebs')
 						notice "Instance #{@resource[:name]} is being stopped by ensure directive"
 						stop 
-						present_state='stopped'
 					else
 						fail "Sorry, you can only stop EBS backed instances."
 					end
-				elsif (present_state == 'stopping')
+				elsif (@property_hash[:ensure] == 'stopping')
 					notice "Instance #{@resource[:name]} is already stopping."
-				elsif (present_state =~ /^pending$/)
-					notice "Instance #{@resource[:name]} is #{present_state}, need to wait for it to be running before stopping it."
-					wait_state(@property_hash[:name],'running',max)
+				elsif (@property_hash[:ensure] =~ /^pending$/)
+					notice "Instance #{@resource[:name]} is #{@property_hash[:ensure]}, need to wait for it to be running before stopping it."
+					wait_state(@property_hash[:instance_id],'running',max)
 				end
-			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs')
+			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'ebs' && @property_hash[:ensure].to_s =~ /^(running|pending)$/)
+				if (@property_hash[:ensure].to_s == 'pending')
+					info "Pending instance #{@resource[:name]} needs to be running before it can be stopped"
+					wait_state(@property_hash[:instance_id],'running',max)
+				end
 				notice "Instance #{@resource[:name]} is being stopped to make required changes"
 				stop 
-				present_state='stopped'
 			end
 		end
 
 		#do I need to make changes?
 		if (@my_changes)
 			if (exists?)
-				if (present_state =~ /^(stopped|stopping)$/)
+				if (@property_hash[:ensure].to_s =~ /^(stopped|stopping)$/)
          		if (@my_changes['stopped'])
-						wait_state(@property_hash[:name],'stopped',max)
+						wait_state(@property_hash[:instance_id],'stopped',max)
 						debug "Making changes which require the instance stopped"
             		@my_changes['stopped'].each do |k,v|
               			send("flush_#{k}=",v)
@@ -547,7 +563,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 		#do I need to start?
 		if (exists?)
-			if (desired_state =~ /^(running|present)$/ && present_state == 'stopped')
+			if (desired_state =~ /^(running|present)$/ && @property_hash[:ensure].to_s == 'stopped')
 				notice "Instance #{@resource[:name]} is being started"
 				start 
 			end
@@ -560,15 +576,15 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 				create
 				if (desired_state == 'stopped')
 					notice "The newly created instance #{@resource[:name]} needs to be stopped."
-					wait_state(@resource[:name],'running',max)
+					wait_state(@property_hash[:instance_id],'running',max)
 					stop
 				end
 			end
 		end			
 	end
 
-	# for looking up information about an ec2 instance given the Name tag
-	def instanceinfo(name)
+	# for looking up information about an ec2 instance given its id
+	def instanceinfo(id)
 		debug "compute.describe_instances"
 		compute = PuppetX::Practicalclouds::Awsaccess.connect(myregion,myaccess)
 		resp = compute.describe_instances	
@@ -576,7 +592,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			# check through the instances looking for one with a matching Name tag
 			resp.body['reservationSet'].each { |x|
 				x['instancesSet'].each { |y| 
-					if ( y['tagSet']['Name'] == name)
+					if ( y['instanceId'] == id)
 						return y
 					end
 				}
@@ -588,26 +604,27 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	end	
 
 	# generic method to wait for an array of instances to reach a desired state...
-	def wait_state(name,desired_state,max)
+	def wait_state(id,desired_state,max)
 		max=max.to_i
 
 		elapsed_wait=0
-		check = instanceinfo(name)
+		check = instanceinfo(id)
 		if ( check )
 			info "Waiting for instance #{name} to be #{desired_state}"
 			while ( check['instanceState']['name'] != desired_state && elapsed_wait < max ) do
-				debug "instance #{name} is #{check['instanceState']['name']}"
+				debug "instance #{id} is #{check['instanceState']['name']}"
 				sleep 5
 				elapsed_wait += 5
-				check = instanceinfo(name)
+				check = instanceinfo(id)
 			end
 			if (elapsed_wait >= max)
-				raise "Timed out waiting for name to be #{desired_state}"
+				raise "Timed out waiting for #{id} to be #{desired_state}"
 			else
-				info "Instance #{name} is #{desired_state}"
+				info "Instance #{id} is #{desired_state}"
+				@property_hash[:ensure]=desired_state
 			end
 		else
-			raise "Sorry, I couldn't find instance #{name}"
+			raise "Sorry, I couldn't find instance #{id}"
 		end
 	end
 
@@ -616,8 +633,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		wait=(@resource[:wait] == :true) ? :true : :false
 		max=(@resource[:max_wait]) ? @resource[:max_wait].to_i : 600
 		if (wait == :true)
-			debug "calling wait_state(#{@resource[:name]},#{desired_state},#{max})"
-			wait_state(@resource[:name],desired_state,max)
+			debug "calling wait_state(#{@property_hash[:instance_id]},#{desired_state},#{max})"
+			wait_state(@property_hash[:instance_id],desired_state,max)
 		end
 	end
 
