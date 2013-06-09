@@ -512,6 +512,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
 				notice "Instance #{@resource[:name]} is and instance store instance and so is being terminated to make changes (which could be made whilst stopped for ebs backed instances)"
 				destroy
+				recreate=true
 			end
 		end
 
