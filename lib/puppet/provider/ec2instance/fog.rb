@@ -282,7 +282,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	def exists?
 		return nil if (!@property_hash)
-		(@property_hash[:ensure]) ? 1 : nil
+		(@property_hash[:ensure] && @property_hash[:ensure] != 'terminated') ? 1 : nil
 	end
 
 	def myregion
@@ -566,15 +566,19 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 		#do I need to start?
 		if (exists?)
+			debug "Instance #{@resource[:name]} exists."
 			if (desired_state =~ /^(running|present)$/ && @property_hash[:ensure].to_s == 'stopped')
 				notice "Instance #{@resource[:name]} is being started"
 				start 
 			end
+		else
+			debug "Instance #{@resource[:name]} does not exist and so does not need starting."
 		end
 			
 		# do I need to be created?
 		if (!exists?)
-			if (desired_state =~ /^(present|running|stopped)$/ || recreate)
+			debug "Instance #{@resource[:name]} does not exist."
+			if ((desired_state =~ /^(present|running|stopped)$/) || recreate)
 				notice "Instance #{@resource[:name]} is being created."
 				create
 				if (desired_state == 'stopped')
@@ -583,6 +587,8 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 					stop
 				end
 			end
+		else
+			debug "Instance #{@resource[:name]} already exists and does not need re-creating."
 		end			
 	end
 
