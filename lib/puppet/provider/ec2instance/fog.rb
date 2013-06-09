@@ -500,6 +500,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		end
 				
 		# do I need to terminate?
+		recreate=nil
 		if (exists?) 
 			if (desired_state =~ /^(terminated|absent)$/) 
 				notice "Instance #{@resource[:name]} is being terminated by ensure directive"
@@ -507,6 +508,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			elsif (@my_changes && @my_changes['terminated'])
 				notice "Instance #{@resource[:name]} is being terminated to make changes which can only be made by terminating and recreating"
 				destroy
+				recreate=true
 			elsif (@my_changes && @my_changes['stopped'] && @property_hash[:root_device_type] == 'instance_store')
 				notice "Instance #{@resource[:name]} is and instance store instance and so is being terminated to make changes (which could be made whilst stopped for ebs backed instances)"
 				destroy
@@ -571,7 +573,7 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 			
 		# do I need to be created?
 		if (!exists?)
-			if (desired_state =~ /^(present|running|stopped)$/)
+			if (desired_state =~ /^(present|running|stopped)$/ || recreate)
 				notice "Instance #{@resource[:name]} is being created."
 				create
 				if (desired_state == 'stopped')
