@@ -1,14 +1,26 @@
 pclouds-aws
 ===========
 
-This module allows you to create EC2 instances using Puppet.
+This module allows you to manage your EC2 instances using Puppet.
 
-More details are [http://www.practicalclouds.com/content/guide/pclouds-aws](http://www.practicalclouds.com/content/guide/pclouds-aws)
+awsaccess { 'default':,
+    ensure => 'present',
+    aws_access_key_id => 'AKIAIAKF4TCXGGWZUSIA',
+    aws_secret_access_key => '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',
+    regions => [ 'eu-west-1', 'us-east-1' ]
+}
+ec2instance {'test1':
+    ensure => "present",
+    region => "eu-west-1",
+    image_id => "ami-90dbd0e4",
+}
+
+Click for more information [http://www.practicalclouds.com/content/guide/pclouds-aws-control-your-aws-platforms-using-puppet-manifests](http://www.practicalclouds.com/content/guide/pclouds-aws-control-your-aws-platforms-using-puppet-manifests)
 
 License
 -------
 
- Copyright 2011 David McCormick
+ Copyright 2013 David McCormick
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
