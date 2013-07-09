@@ -1,8 +1,7 @@
-require 'rubygems'
 require 'fog'
 require 'facter'
 require 'pp'
-require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
+require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','storable.rb'))
 
 $debug=true
 
@@ -14,7 +13,7 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 
 	def self.instances
 		resp=[]
-		chash = PuppetX::Practicalclouds::Yamlhash.load('awsaccess')
+		chash = PuppetX::Practicalclouds::Storable::load('awsaccess')
 		return [] if (chash == {})
 		chash.keys.each {|n|
 			settings = chash[n]
@@ -64,14 +63,14 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 
 	def flush
 		if (@updated_properties == true)
-			configshash = PuppetX::Practicalclouds::Yamlhash.load('awsaccess')
+			configshash = PuppetX::Practicalclouds::Storable::load('awsaccess')
 			if (@property_hash[:ensure] == :present)
 				configshash[@property_hash[:name]] = @property_hash
 				configshash[@property_hash[:name]].delete(:name)
 			else
 				configshash.delete(@property_hash[:name])
 			end
-			PuppetX::Practicalclouds::Yamlhash.save('awsaccess',configshash)
+			PuppetX::Practicalclouds::Storable::store('awsaccess',configshash)
 		end
 	end
 
