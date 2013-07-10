@@ -1,5 +1,5 @@
 name    'pclouds-aws'
-version '0.1.0'
+version '0.1.1'
 source 'http://github.com/practicalclouds/pclouds-aws'
 author 'pclouds'
 license 'Apache License, Version 2.0'

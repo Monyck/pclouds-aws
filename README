@@ -1,21 +1,29 @@
 pclouds-aws
 ===========
 
-This module allows you to manage your EC2 instances using Puppet.
+This module allows you to manage your EC2 instances using Puppet: -
 
-awsaccess { 'default':,
-    ensure => 'present',
-    aws_access_key_id => 'AKIAIAKF4TCXGGWZUSIA',
-    aws_secret_access_key => 'jn6sKRHWyhFet8oOL+jx/nC1WTHRdKcR1Bo66gC9',
-    regions => [ 'eu-west-1', 'us-east-1' ]
-}
-ec2instance {'test1':
-    ensure => "present",
-    region => "eu-west-1",
-    image_id => "ami-90dbd0e4",
-}
+    awsaccess { 'default':,
+        ensure => 'present',
+        aws_access_key_id => 'AKIAIAKF4TCXGGWZUSIA',
+        aws_secret_access_key => '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',
+        regions => [ 'eu-west-1', 'us-east-1' ]
+    }
+    ec2instance {'test1':
+        ensure => "present",
+        region => "eu-west-1",
+        image_id => "ami-90dbd0e4",
+    }
+
+and it allows you to view your ec2instances using the "puppet resource ec2instance" command.
 
 Click for more information [http://www.practicalclouds.com/content/guide/pclouds-aws-control-your-aws-platforms-using-puppet-manifests](http://www.practicalclouds.com/content/guide/pclouds-aws-control-your-aws-platforms-using-puppet-manifests)
+
+Version
+-------
+
+0.1.0 : Fix broken check-in leading to unknown constant error
+0.1.1 : Make compatible with Ruby 1.8 and 1.9
 
 License
 -------
