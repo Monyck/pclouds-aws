@@ -32,7 +32,6 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 	def self.instances
 		regions = PuppetX::Practicalclouds::Awsaccess.regions('default')
 		regions = ['us-east-1','us-west-1','us-west-2','eu-west-1','ap-southeast-1','ap-southeast-2','ap-northeast-1','sa-east-1'] if (regions==[])
-		pp regions
 
 		# get a list of instances in all of the regions we are configured for.
 		allinstances={}
