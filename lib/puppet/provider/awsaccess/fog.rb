@@ -1,7 +1,17 @@
 require 'fog'
 require 'facter'
 require 'pp'
-require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','storable.rb'))
+
+# Allow Ruby 1.8 and 1.9 compatibility
+unless Kernel.respond_to?(:require_relative)
+	module Kernel
+		def require_relative(path)
+			require File.join(File.dirname(caller[0]), path.to_str)
+		end
+	end
+end
+
+require_relative '../../../puppet_x/practicalclouds/storable.rb' 
 
 $debug=true
 

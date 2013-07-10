@@ -3,8 +3,18 @@ require 'fog'
 require 'facter'
 require 'pp'
 require 'base64'
-require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','connection.rb'))
-require File.expand_path(File.join(File.dirname(__FILE__),'..','..','..','puppet_x','practicalclouds','storable.rb'))
+
+# Allow Ruby 1.8 and 1.9 compatibility
+unless Kernel.respond_to?(:require_relative)
+   module Kernel
+      def require_relative(path)
+         require File.join(File.dirname(caller[0]), path.to_str)
+      end
+   end
+end
+
+require_relative '../../../puppet_x/practicalclouds/connection.rb'
+require_relative '../../../puppet_x/practicalclouds/storable.rb'
 
 Puppet::Type.type(:ec2instance).provide(:fog) do
 	desc "The AWS Provider which implements the ec2instance type."
