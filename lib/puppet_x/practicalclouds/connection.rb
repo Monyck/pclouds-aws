@@ -15,7 +15,7 @@ module PuppetX
 				if (@@credentials == {})
 					@@credentials = PuppetX::Practicalclouds::Storable::load('awsaccess')
 				end
-				if (@@credentials[name])
+				if (@@credentials && @@credentials[name])
 					return (@@credentials[name][:regions]) ? @@credentials[name][:regions] : []
 				else
 					raise "Sorry, awsaccess credential '#{name}' does not exist!"
@@ -25,7 +25,7 @@ module PuppetX
 			# Connect to an AWS region using a specific credential
 			def self.connect(reg,name)
 				# return an existing connection...
-				if (@@connections[reg])
+				if (@@connections && @@connections[reg])
 					if (@@connections[reg][name]) 
 						return @@connections[reg][name]
 					end
@@ -35,6 +35,7 @@ module PuppetX
 				if (@@credentials == {})
 					@@credentials = PuppetX::Practicalclouds::Storable::load('awsaccess')
 				end
+				raise "Sorry, I couldn't find any awsaccess objects!" if (!@@credentials)
 				if (@@credentials[name])
 					if (@@credentials[name][:regions] && !@@credentials[name][:regions].member?(reg))
 						raise "Sorry, Awsaccess '#{name}' is not allowed in region '#{reg}'"

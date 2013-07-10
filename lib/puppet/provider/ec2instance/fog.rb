@@ -116,11 +116,16 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 		#pp allinstances
 
 		# return the array of resources
-		allinstances.values.map {|x| new(x)}
+		if (allinstances == {})
+			return []
+		else
+			allinstances.values.map {|x| new(x)}
+		end
 	end
 
 	def self.prefetch(resources)
 		configs = instances
+		return [] if (!instances)
 		resources.keys.each do |name|
 			if provider = configs.find{ |conf| conf.name == name}
 				resources[name].provider = provider
@@ -130,7 +135,11 @@ Puppet::Type.type(:ec2instance).provide(:fog) do
 
 	def self.lookup_yaml(area,name)
 		data = PuppetX::Practicalclouds::Storable::load(area)
-		data[name]
+		if (data)
+			data[name]
+		else
+			nil
+		end
 	end
 
 	#---------------------------------------------------------------------------------------------------

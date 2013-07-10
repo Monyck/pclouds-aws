@@ -24,7 +24,7 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	def self.instances
 		resp=[]
 		chash = PuppetX::Practicalclouds::Storable::load('awsaccess')
-		return [] if (chash == {})
+		return [] if (!chash)
 		chash.keys.each {|n|
 			settings = chash[n]
 			settings[:name] = n
@@ -36,9 +36,11 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 
 	def self.prefetch(resources)
 		configs = instances
-		resources.keys.each do |name|
-			if provider = configs.find{ |conf| conf.name == name}
-				resources[name].provider = provider
+		if (configs != [])
+			resources.keys.each do |name|
+				if provider = configs.find{ |conf| conf.name == name}
+					resources[name].provider = provider
+				end
 			end
 		end
 	end
@@ -61,6 +63,7 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	end
 
 	def create
+		@property_hash = {} if (!@property_hash)
 		atts = [ :name, :ensure, :regions, :aws_access_key_id, :aws_secret_access_key ]
 		atts.each {|att| @property_hash[att] = @resource[att] if (@resource[att])}
 		@updated_properties = true
@@ -74,6 +77,7 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	def flush
 		if (@updated_properties == true)
 			configshash = PuppetX::Practicalclouds::Storable::load('awsaccess')
+			configshash = {} if (!configshash)
 			if (@property_hash[:ensure] == :present)
 				configshash[@property_hash[:name]] = @property_hash
 				configshash[@property_hash[:name]].delete(:name)
@@ -85,6 +89,10 @@ Puppet::Type.type(:awsaccess).provide(:fog) do
 	end
 
 	def exists?
-		@property_hash[:ensure] == :present
+		if (!@property_hash)
+			return nil
+		else
+			@property_hash[:ensure] == :present
+		end
 	end
 end

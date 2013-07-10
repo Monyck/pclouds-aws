@@ -14,18 +14,20 @@ module PuppetX
 				if File.exists?(YAMLFILE)
 					hash = {}
 					yamlf = YAML::load(File.open(YAMLFILE))
-					if (yamlf[type])
-						hash = yamlf[type].clone
+					if (yamlf)
+						if (yamlf[type])
+							hash = yamlf[type].clone
+						end
 					end
 				end
 				hash
 			end
 
 			def self.store(type,hash)
-				outhash = {}
 				if File.exists?(YAMLFILE)
 					outhash = YAML::load(File.open(YAMLFILE))
 				end
+				outhash = {} if (!outhash)	
 				outhash[type] = hash
 				File.open(YAMLFILE,'w+') {|f| f.write(outhash.to_yaml) }
 			end
